@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Head, Foot, Status, Seg, Field, NumIn, Sfx, fmt, comma, won, LABEL, calLabel, shocksOf, summary, copyText, evName, shockOk } from './ui.jsx';
-import { checkPlan, annualPlus, SCENARIOS, toShock, run, toMarket, safetyLine, products, retirement, TEMPLATES, mortgage, alertLevel, monthsBetween, PROFILE_MAX } from './rules.js';
+import { checkPlan, annualPlus, SCENARIOS, toShock, run, toMarket, safetyLine, products, retirement, TEMPLATES, mortgage, alertLevel, monthsBetween, inputProblems, PROFILE_MAX } from './rules.js';
 import { simulate, monteCarlo, GRADES } from './engine.js';
 
 export const STATUS = { recheck: '재검증 필요', inprogress: '검증 진행 중', before: '검증 전', adopted: '채택 완료' };
@@ -102,14 +102,17 @@ function Pct({ value, onChange, digits = 2, label }) {
     onChange={e => { setT(e.target.value); const n = parseFloat(e.target.value); onChange(e.target.value === '' || Number.isNaN(n) ? '' : n); }} onBlur={() => setT(null)} />;
 }
 export function Market({ st, setSt, go }) {
-  const [m, setM] = useState(st.market), [msg, setMsg] = useState('');
+  const [m, setM] = useState(st.market), [msg, setMsg] = useState(''), [rep, setRep] = useState(null);
+  const repRef = useRef(null);
+  useEffect(() => { if (rep) repRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, [rep]);
   const base = useRef(st.market); // 화면을 연 시점의 값 — 편집한 항목만 골라 저장한다
-  const set = (k, f, v) => { setMsg(''); setM({ ...m, [k]: { ...m[k], [f]: v } }); };
+  const set = (k, f, v) => { setMsg(''); setRep(null); setM({ ...m, [k]: { ...m[k], [f]: v } }); };
+  const edited = k => m[k].value !== base.current[k].value;
   const bad = k => m[k].value === '' || Math.abs(m[k].value) > 20;
   const keys = ['policy', 'deposit', 'loan', 'cpi', 'invest', 'pension'];
   const ok = !!m.asOf && !keys.some(bad) && m.crashes.every(c => c.drop !== '' && c.drop > 0 && c.drop < 100);
   const line = (k, l) => (
-    <div className="mrow" key={k}><span className="ml">{l}</span>
+    <div className={`mrow ${edited(k) ? 'chg' : ''}`} key={k}><span className="ml">{l}{edited(k) && <em className="chgtag">변경</em>}</span>
       <div className="mr"><label className={`mv ${bad(k) ? 'bad' : ''}`}><Pct label={l} digits={['invest', 'pension', 'cpi'].includes(k) ? 1 : 2} value={m[k].value} onChange={v => set(k, 'value', v)} />%</label>
         <input className="msrc" value={m[k].src} onChange={e => set(k, 'src', e.target.value)} aria-label={`${l} 출처`} />{bad(k) && <small className="err">값을 확인해 주세요</small>}</div></div>
   );
@@ -118,8 +121,19 @@ export function Market({ st, setSt, go }) {
     const n = st.clients.filter(c => c.status === 'adopted').length;
     const changed = Object.keys(m).filter(k => JSON.stringify(m[k]) !== JSON.stringify(base.current[k]));
     setSt(s => ({ ...s, market: { ...s.market, ...Object.fromEntries(changed.map(k => [k, m[k]])) }, clients: s.clients.map(c => (big && c.status === 'adopted' ? { ...c, status: 'recheck' } : c)) }));
+    // 무엇이 바뀌었고 고객 결과가 얼마나 달라졌는지 보여준다 (충격 없는 기본 상황, 채택안 기준)
+    const after = { ...old, ...Object.fromEntries(changed.map(k => [k, m[k]])) };
+    const NAMES = { policy: '기준금리', deposit: '예금 금리', loan: '가계대출 금리', cpi: '소비자물가', invest: '투자 기대수익률', pension: '연금 기대수익률' };
+    const changes = Object.keys(NAMES).filter(k => Math.abs(after[k].value - old[k].value) >= 0.005).map(k => `${NAMES[k]} ${Number(old[k].value).toFixed(2)} → ${Number(after[k].value).toFixed(2)}%`);
+    if (JSON.stringify(after.crashes) !== JSON.stringify(old.crashes)) changes.push('투자 급락 프리셋');
+    if (after.asOf !== old.asOf) changes.push(`기준일 ${old.asOf.replace(/-/g, '.')} → ${after.asOf.replace(/-/g, '.')}`);
+    const rows = st.clients.filter(c => inputProblems(c).length === 0).map(c => {
+      const plan = c.adopted === 'A' ? c.planA : c.planB, b = run(c, null, plan, [], old), a = run(c, null, plan, [], after);
+      return { id: c.id, name: c.name, goal: [b.goalPct, a.goalPct], min: [b.minMonths, a.minMonths], grade: [b.grade, a.grade], flip: big && c.status === 'adopted' };
+    });
     base.current = m;
-    setMsg(`저장했습니다. 전체 고객 ${st.clients.length}명을 새 값으로 다시 계산했습니다.${big && n ? ` 변동 폭이 커서 재검증 필요 ${n}명이 생겼습니다.` : ''}`);
+    setMsg('');
+    setRep({ changes, rows, big, n, at: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) });
   };
   return (
     <>
@@ -127,6 +141,15 @@ export function Market({ st, setSt, go }) {
         <div className="row between"><button className="back" onClick={() => go('home')}>‹ 홈</button><span className="hr">AI 제안 검증 도구</span></div>
         <h1>시장 환경</h1><p className="sub">모든 고객의 시뮬레이션에 공통 적용됩니다</p></header>
       <section className="pad">
+        {rep && <div className="card rep" ref={repRef} role="status"><div className="row between"><b>재계산 결과</b><span className="muted">{rep.at} 저장</span></div>
+          {rep.changes.length ? <ul className="chgs">{rep.changes.map(x => <li key={x}>{x}</li>)}</ul> : <p className="muted">바뀐 값이 없어 결과도 그대로입니다.</p>}
+          {rep.rows.length > 0 && <table className="cmp sm"><thead><tr><th>고객</th><th>목표 달성률</th><th>최저 비상자금</th><th>경보</th></tr></thead><tbody>
+            {rep.rows.map(r => { const dg = Math.round(r.goal[1]) - Math.round(r.goal[0]), dm = Math.round(r.min[1] * 10) / 10 - Math.round(r.min[0] * 10) / 10; return (
+              <tr key={r.id}><td>{r.name}</td>
+                <td>{fmt(r.goal[0])}% → <b>{fmt(r.goal[1])}%</b><i className={`dlt ${dg > 0 ? 'up' : dg < 0 ? 'down' : ''}`}>{dg === 0 ? '변화 없음' : `${dg > 0 ? '+' : '−'}${Math.abs(dg)}%p`}</i></td>
+                <td>{fmt(r.min[0], 1)} → <b>{fmt(r.min[1], 1)}</b>개월<i className={`dlt ${dm > 0 ? 'up' : dm < 0 ? 'down' : ''}`}>{dm === 0 ? '변화 없음' : `${dm > 0 ? '+' : '−'}${Math.abs(dm).toFixed(1)}`}</i></td>
+                <td>{r.grade[0] === r.grade[1] ? r.grade[1] : <>{r.grade[0]} → <b>{r.grade[1]}</b></>}{r.flip && <i className="dlt down">재검증 필요</i>}</td></tr>); })}</tbody></table>}
+          {rep.big ? <p className="warn">변동 폭이 커서 채택한 고객 중 재검증이 필요해진 고객이 있습니다. 홈에서 확인하세요.</p> : <p className="muted">변동 폭이 재검증 기준(금리 0.25%p, 물가 0.5%p) 미만이라 채택 상태는 그대로입니다.</p>}</div>}
         <div className="strip"><label>기준일 <input type="date" value={m.asOf} onChange={e => { setMsg(''); setM({ ...m, asOf: e.target.value }); }} /></label><button className="lnk big" onClick={() => go('auto')}>자동 갱신 설정 ›</button></div>
         <div className="card">{line('policy', '기준금리')}{line('deposit', '예금 금리 → 예금 수익률')}{line('loan', '가계대출 금리')}{line('cpi', '소비자물가 상승률')}</div>
         <div className="card">{line('invest', '투자 기대수익률')}{line('pension', '연금 기대수익률')}</div>
