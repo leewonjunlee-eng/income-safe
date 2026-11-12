@@ -18,11 +18,11 @@
   },
   "invest": {
     "value": 6,
-    "src": "팀 가정"
+    "src": "자체 설정"
   },
   "pension": {
     "value": 4,
-    "src": "팀 가정"
+    "src": "자체 설정"
   },
   "crashes": [
     {

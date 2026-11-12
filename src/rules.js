@@ -24,7 +24,7 @@ export function checkPlan(c, plan, m) {
   const ap = annualPlus(c, m);
   const penYear = (ap * pen) / 100, isaYear = (ap * inv) / 100;
   const emgTarget = c.living * c.emergencyMonths;
-  const avgInc = c.type === 'fixed' ? c.income : Object.values(c.incomeByMonth).reduce((a, b) => a + b, 0) / 12;
+  const avgInc = c.type === 'fixed' ? +c.income || 0 : Object.values(c.incomeByMonth || {}).reduce((a, b) => a + (+b || 0), 0) / 12;
   const rate = 0.165;
   const maxInv = PROFILE_MAX[c.grade];
   const rules = [
@@ -72,7 +72,8 @@ export function safetyLine(c, m, shocks) {
     if (ok(sim(c, { ...A, alloc: [p, A.alloc[1], A.alloc[2] - d, A.alloc[3]] }))) m1 = p;
   }
   let m2 = null;
-  for (let x = 50; x <= c.invest && m2 == null; x += 50) {
+  const room = c.invest - (+A.realloc?.invToGoal || 0); // 이미 목표 예금으로 옮긴 몫은 뺀다
+  for (let x = 50; x <= room && m2 == null; x += 50) {
     if (ok(sim(c, { ...A, realloc: { ...(A.realloc || {}), invToEmerg: x } }))) m2 = x;
   }
   let m3 = null;
@@ -102,10 +103,24 @@ export const TEMPLATES = {
   결혼: { at: 18, lump: 0, living: 40, incomePct: 0, incomeMonths: 0, note: '목표(입주자금)와 연결' },
   출산: { at: 12, lump: 300, living: 60, incomePct: -25, incomeMonths: 12 },
   이직: { at: 6, lump: 0, living: 0, incomePct: -100, incomeMonths: 2, afterPct: 10, note: '소득 공백 2개월, 이후 +10%' },
-  '주택 구입': { at: 12, lump: 2000, living: 0, incomePct: 0, incomeMonths: 0, loan: 20000, years: 30, note: '계약금 목돈 + 주택담보대출 월 상환 추가' },
+  '주택 구입': { at: 12, lump: 20000, living: 0, incomePct: 0, incomeMonths: 0, loan: 20000, years: 30, note: '계약금 목돈 + 주택담보대출 월 상환 추가' },
   육아휴직: { at: 12, lump: 0, living: 60, incomePct: -50, incomeMonths: 12, note: '고용보험 육아휴직 급여 기준 확인 후 고객별 조정' },
   창업: { at: 6, lump: 1000, living: 0, incomePct: -50, incomeMonths: 6, note: '이후 변동형으로 전환' },
 };
+
+// 계산에 필요한 고객 입력이 다 찼는지 (빈 칸·0·음수 차단)
+export function inputProblems(c) {
+  const p = [], n = x => x !== '' && x != null && Number.isFinite(+x), money = ['emergency', 'invest', 'goalDeposit', 'loanPay', 'loanBal'];
+  if (!(n(c.living) && +c.living > 0)) p.push('고정 생활비');
+  money.forEach(k => { if (!n(c[k]) || +c[k] < 0) p.push({ emergency: '비상자금', invest: '투자자산', goalDeposit: '목표용 예금', loanPay: '월 대출 상환액', loanBal: '대출 잔액' }[k]); });
+  if (c.type === 'fixed' ? !(n(c.income) && +c.income >= 0) : Object.keys(c.incomeByMonth || {}).length < 12 || Object.values(c.incomeByMonth).some(v => !n(v) || +v < 0)) p.push('소득');
+  if (!(+c.taxShare >= 0 && +c.taxShare <= 1)) p.push('세금 몫(0~100%)');
+  if (!(n(c.goalAmount) && +c.goalAmount > 0) || !c.goalName) p.push('목표 이름·금액');
+  if (!c.goalDate || monthsBetween(c) == null) p.push('목표 시점(1~60개월)');
+  if (!(n(c.emergencyMonths) && +c.emergencyMonths > 0)) p.push('비상자금 목표 개월수');
+  if (!(n(c.psychLimit) && +c.psychLimit >= 0)) p.push('심리적 손실 한도');
+  return p;
+}
 
 export function alertLevel(dec, em, T) {
   let g = 0;

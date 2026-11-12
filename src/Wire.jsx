@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Head, Foot, Status, Seg, Field, NumIn, Sfx, fmt, comma, won, LABEL, calLabel, shocksOf, summary, copyText, evName, shockOk } from './ui.jsx';
 import { checkPlan, annualPlus, SCENARIOS, toShock, run, toMarket, safetyLine, products, retirement, TEMPLATES, mortgage, alertLevel, monthsBetween, PROFILE_MAX } from './rules.js';
 import { simulate, monteCarlo, GRADES } from './engine.js';
@@ -21,15 +21,15 @@ export function buildSchedule(st) {
     { id: 'd3', date: `${year}-12-12`, title: '수아 ISA 만기 D-0', cat: '만기', auto: true, kind: '만기', demo: true },
   ];
   const targets = st.clients.filter(c => c.planA?.alloc[3] > 0 || c.planB?.alloc[3] > 0).length + 2; // 지호·수아는 시연 고정값
-  list.push({ id: 'pension', date: `${year}-12-20`, title: `연말 연금저축·IRP 납입 마감 안내 · 고객 ${targets}명`, cat: '세제', auto: true, kind: '세제' });
+  list.push({ id: 'pension', date: `${year}-12-20`, title: `연말 연금저축·IRP 납입 마감 안내 · 고객 ${targets}명`, cat: '세제', auto: true, kind: '세제', bulk: true });
   st.clients.filter(c => c.status === 'adopted' || c.status === 'recheck').forEach(c => {
     const at = c.work.record?.atISO || asOf;
-    list.push({ id: `q-${c.id}`, date: addMonths(at, 2).slice(0, 8) + '01', title: `${c.name} 분기 점검 · 비상자금 목표 진행률`, cat: '점검', auto: true, kind: '리밸런싱' });
+    list.push({ id: `q-${c.id}`, date: addMonths(at, 2).slice(0, 8) + '01', title: `${c.name} 분기 점검 · 비상자금 목표 진행률`, cat: '점검', auto: true, kind: '리밸런싱', cid: c.id });
     if (c.type === 'variable') {
       const avg = Object.values(c.incomeByMonth).reduce((a, b) => a + b, 0) / 12;
-      for (let k = 1; k <= 12; k++) { const d = addMonths(asOf.slice(0, 8) + '01', k), m = +d.slice(5, 7); if (c.incomeByMonth[m] < avg * 0.6) { list.push({ id: `s-${c.id}`, date: d, title: `${c.name} 비수기 진입 · 경보 기준 확인`, cat: '점검', auto: true, kind: '모니터링' }); break; } }
+      for (let k = 1; k <= 12; k++) { const d = addMonths(asOf.slice(0, 8) + '01', k), m = +d.slice(5, 7); if (c.incomeByMonth[m] < avg * 0.6) { list.push({ id: `s-${c.id}`, date: d, title: `${c.name} 비수기 진입 · 경보 기준 확인`, cat: '점검', auto: true, kind: '모니터링', cid: c.id }); break; } }
     }
-    if (c.isaEnd) list.push({ id: `isa-${c.id}`, date: addMonths(c.isaEnd, -1), title: `${c.name} ISA 만기 30일 전 안내`, cat: '만기', auto: true, kind: '만기' });
+    if (c.isaEnd) list.push({ id: `isa-${c.id}`, date: addMonths(c.isaEnd, -1), due: c.isaEnd, cid: c.id, title: `${c.name} ISA 만기 30일 전 안내`, cat: '만기', auto: true, kind: '만기' });
   });
   return [...list, ...(st.schedule || [])].sort((a, b) => a.date.localeCompare(b.date) || (a.time || '').localeCompare(b.time || ''));
 }
@@ -43,16 +43,13 @@ export function Home({ st, go, setSt, nav }) {
   const list = [...st.clients].sort((a, b) => ORD[a.status] - ORD[b.status]);
   const cnt = s => st.clients.filter(c => c.status === s).length;
   const wait = cnt('before') + cnt('inprogress'), soon = sched.filter(x => { const d = daysTo(asOf, x.date); return d >= 0 && d <= 14; }).length;
-  const normal = Math.max(0, TOTAL - wait - soon - cnt('recheck'));
-  const nextScreen = c => ({ before: 'info', inprogress: c.work.record ? 'report' : 'plan', recheck: 'scen', adopted: 'report' }[c.status]);
+  const normal = Math.max(0, TOTAL - wait - 2 - cnt('recheck')); // 2 = 일정 임박 시연 고객(지호·수아)
+  const nextScreen = c => ({ before: 'info', inprogress: c.work.record ? (st.settings?.review ? 'review' : 'record') : 'plan', recheck: 'scen', adopted: 'report' }[c.status]);
   const sub = c => c.status === 'inprogress' ? `검증 진행 중${Object.keys(c.work.judge || {}).length ? ` · AI 원안 점검 ${Object.keys(c.work.judge).length}건 반영` : ''}` : c.status === 'before' ? `검증 전${c.survey && !c.surveyApplied ? ' · 사전 설문 도착' : ''}` : c.status === 'recheck' ? '재검증 필요 · 모니터링 경보' : `채택 완료 · ${c.adopted}안`;
   const add = () => {
     if (!name.trim()) return;
-    const id = 'c' + Date.now(), blank = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [i + 1, '']));
-    setSt(s => ({ ...s, clients: [...s.clients, { id, name: name.trim(), job: '신규', type: 'fixed', status: 'before', work: { shocks: {}, judge: {}, memo: '', record: null, schemes: [] },
-      income: '', incomeByMonth: blank, taxShare: 0, living: '', loanPay: 0, loanBal: 0, emergency: '', invest: '', goalDeposit: '', goalAmount: '', goalName: '목표', goalDate: '', startMonth: s.clients[0].startMonth, startYear: s.clients[0].startYear, months: 12,
-      emergencyMonths: 3, psychLimit: '', grade: '위험중립형', insurance: { monthly: 0, months: 3 }, sonjil: false, hospitalDaily: 0, age: 30, events: [], history: [], survey: null, consent: null, adopted: null, household: false,
-      planA: { alloc: [10, 30, 50, 10] }, planB: { alloc: [40, 50, 0, 10] } }] }));
+    const id = 'c' + Date.now();
+    setSt(s => ({ ...s, clients: [...s.clients, { ...blankFields(), id, name: name.trim(), job: '신규', startMonth: s.clients[0].startMonth, startYear: s.clients[0].startYear, months: 12 }] }));
     go('info', id);
   };
   const todayItems = sched.filter(x => x.date === asOf);
@@ -86,7 +83,7 @@ export function Home({ st, go, setSt, nav }) {
           </button>
         ))}
         {[['지호', '프리랜서 디자이너 · 변동형', '다음 상담 11.20'], ['수아', '간호사 · 고정형', 'ISA 만기 D-30']].map(([n, j, s]) => (
-          <div key={n} className="card item static"><i className="dot adopted" /><div><b className="nm">{n}</b> <span className="muted">{j}</span><br /><span className="muted">{s}</span></div><span className="chev">시연</span></div>
+          <div key={n} className="card item static"><i className="dot adopted" /><div><b className="nm">{n}</b> <span className="muted">{j}</span><br /><span className="muted">{s}</span></div><span className="chev">›</span></div>
         ))}
         {adding ? (
           <div className="card"><Field label="새 고객 이름"><input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} autoFocus placeholder="이름" /></Field>
@@ -106,6 +103,7 @@ function Pct({ value, onChange, digits = 2, label }) {
 }
 export function Market({ st, setSt, go }) {
   const [m, setM] = useState(st.market), [msg, setMsg] = useState('');
+  const base = useRef(st.market); // 화면을 연 시점의 값 — 편집한 항목만 골라 저장한다
   const set = (k, f, v) => { setMsg(''); setM({ ...m, [k]: { ...m[k], [f]: v } }); };
   const bad = k => m[k].value === '' || Math.abs(m[k].value) > 20;
   const keys = ['policy', 'deposit', 'loan', 'cpi', 'invest', 'pension'];
@@ -118,7 +116,9 @@ export function Market({ st, setSt, go }) {
   const save = () => {
     const old = st.market, big = ['policy', 'deposit', 'loan'].some(k => Math.abs(m[k].value - old[k].value) >= 0.25) || Math.abs(m.cpi.value - old.cpi.value) >= 0.5;
     const n = st.clients.filter(c => c.status === 'adopted').length;
-    setSt(s => ({ ...s, market: m, clients: s.clients.map(c => (big && c.status === 'adopted' ? { ...c, status: 'recheck' } : c)) }));
+    const changed = Object.keys(m).filter(k => JSON.stringify(m[k]) !== JSON.stringify(base.current[k]));
+    setSt(s => ({ ...s, market: { ...s.market, ...Object.fromEntries(changed.map(k => [k, m[k]])) }, clients: s.clients.map(c => (big && c.status === 'adopted' ? { ...c, status: 'recheck' } : c)) }));
+    base.current = m;
     setMsg(`저장했습니다. 전체 고객 ${st.clients.length}명을 새 값으로 다시 계산했습니다.${big && n ? ` 변동 폭이 커서 재검증 필요 ${n}명이 생겼습니다.` : ''}`);
   };
   return (
@@ -127,13 +127,12 @@ export function Market({ st, setSt, go }) {
         <div className="row between"><button className="back" onClick={() => go('home')}>‹ 홈</button><span className="hr">AI 제안 검증 도구</span></div>
         <h1>시장 환경</h1><p className="sub">모든 고객의 시뮬레이션에 공통 적용됩니다</p></header>
       <section className="pad">
-        <div className="strip"><label>기준일 <input type="date" value={m.asOf} onChange={e => { setMsg(''); setM({ ...m, asOf: e.target.value }); }} /></label><button className="lnk big" onClick={() => go('shot', null, 's3')}>자동 갱신 설정 ›</button></div>
+        <div className="strip"><label>기준일 <input type="date" value={m.asOf} onChange={e => { setMsg(''); setM({ ...m, asOf: e.target.value }); }} /></label><button className="lnk big" onClick={() => go('auto')}>자동 갱신 설정 ›</button></div>
         <div className="card">{line('policy', '기준금리')}{line('deposit', '예금 금리 → 예금 수익률')}{line('loan', '가계대출 금리')}{line('cpi', '소비자물가 상승률')}</div>
         <div className="card">{line('invest', '투자 기대수익률')}{line('pension', '연금 기대수익률')}</div>
         <div className="card"><p className="ttl">투자 급락 프리셋 · 코스피 고점 대비</p>
           {m.crashes.map((c, i) => <div className="crow" key={c.name}><b>{c.label || c.name}</b><span className="muted">{c.period}</span>
             <label className="neg"><span>−</span><NumIn aria-label={`${c.label || c.name} 하락률`} value={c.drop} onChange={v => { setMsg(''); setM({ ...m, crashes: m.crashes.map((x, j) => (j === i ? { ...x, drop: v } : x)) }); }} /><span>%</span></label></div>)}</div>
-        <p className="muted center">팀 가정 값은 리포트에 "가정"으로 표시됩니다</p>
         {msg && <p className="ok center">{msg}</p>}
       </section>
       <Foot><button className="btn" disabled={!ok} onClick={save}>저장하고 전체 고객 재계산</button></Foot>
@@ -149,7 +148,7 @@ export function Settings({ st, setSt, go }) {
         <label className="check"><input type="checkbox" checked={!!st.settings?.review} onChange={e => setSt(s => ({ ...s, settings: { ...s.settings, review: e.target.checked } }))} />선임 검토 사용 (조직에서 쓸 때)</label>
         <p className="label">고객용 화면 열기 (상담 준비 링크)</p>
         {st.clients.map(c => <button key={c.id} className="card item" onClick={() => go('consent', c.id)}><div><b>{c.name} 님 상담 준비 링크</b><br /><span className="muted">동의 → 사전 설문</span></div><span className="chev">›</span></button>)}
-        <button className="card item" onClick={() => go('demos')}><div><b>시연 화면 모음</b><br /><span className="muted">외부 연동이 필요한 화면</span></div><span className="chev">›</span></button>
+        <button className="card item" onClick={() => go('auto')}><div><b>시장 데이터 자동 갱신</b><br /><span className="muted">ECOS · KOSIS · 공공데이터포털</span></div><span className="chev">›</span></button>
         <button className="btn ghost" onClick={() => { if (confirm('저장된 고객·시장 데이터를 모두 지우고 처음 상태로 돌립니다.')) { localStorage.removeItem('income-safe-v2'); location.reload(); } }}>데이터 초기화</button>
       </section>
     </>
@@ -182,7 +181,7 @@ export function Schedule({ st, setSt, go }) {
       </section>
       <Foot>
         <button className="btn" disabled={!target} onClick={async () => setCopied((await copyText(msg(target))) ? 'ok' : 'fail')}>{copied === 'ok' ? '복사했습니다' : copied === 'fail' ? '복사하지 못했습니다 · 직접 선택해 복사하세요' : '고객 안내 문구 복사'}</button>
-        <div className="row two"><button className="link" onClick={() => setAdd({ date: asOf, time: '', title: '' })}>+ 일정 직접 추가</button><button className="link" onClick={() => go('shot', null, 's5')}>알림 보내기 (시연)</button></div>
+        <div className="row two"><button className="link" onClick={() => setAdd({ date: asOf, time: '', title: '' })}>+ 일정 직접 추가</button><button className="link" onClick={() => go('notify', undefined, target?.id)}>알림 보내기</button></div>
       </Foot>
     </>
   );
@@ -204,8 +203,8 @@ export function Consent({ client: c, upd, go }) {
         <Item k="ai" tag="선택" title="서류 자동 분석(AI 처리)" desc="올린 서류에서 값을 읽는 데 AI를 씁니다. 읽은 값은 설계사가 확인한 뒤에만 쓰입니다." />
         <Item k="spouse" tag="선택" title="배우자 정보 함께 입력" desc="가구 단위 설계를 원할 때만. 배우자 본인의 동의가 따로 필요합니다." />
         <div className="card sm2">동의는 언제든 철회할 수 있고, 철회하면 입력한 정보는 삭제됩니다. 동의 일시와 항목은 상담 기록에 함께 남습니다.</div>
-        {ch.ai && <button className="link" onClick={() => go('shot', c.id, 's8')}>서류 자동 입력 화면 보기 (시연)</button>}
-        <button className="link" onClick={() => go('shot', c.id, 's9')}>마이데이터로 불러오기 (시연)</button>
+        {ch.ai && <button className="link" onClick={() => go('docs')}>서류로 자동 입력하기</button>}
+        <button className="link" onClick={() => go('mydata')}>계좌 정보로 한 번에 채우기</button>
       </section>
       <Foot><button className="btn" disabled={!ch.req} onClick={() => { upd({ consent: { at: new Date().toLocaleString('ko-KR'), items: ch } }); go('survey'); }}>동의하고 시작하기</button><button className="link" onClick={() => go('home')}>나중에 할게요</button></Foot>
     </>
@@ -250,15 +249,17 @@ export function Survey({ client: c, upd, go }) {
           : <div className="card"><div className="row"><label className="sfx grow"><NumIn value={v ?? ''} onChange={x => setA({ ...a, [q.k]: x })} autoFocus /><span>만 원</span></label></div><p className="muted">{q.num}</p></div>}
         {needLow && <div className="card"><p className="ttl">{q.extra.q}</p><div className="row"><label className="sfx grow"><NumIn value={a[q.extra.k] ?? ''} onChange={x => setA({ ...a, [q.extra.k]: x })} /><span>만 원</span></label><span className="muted">{q.extra.note}</span></div></div>}
         <p className="muted center">답변은 담당 설계사에게만 전달됩니다<br />정확하지 않아도 상담에서 함께 고칩니다</p>
-        <button className="link" onClick={() => { if (confirm('동의를 철회하면 이 고객의 입력 정보(소득·지출·자산·목표·설문)가 모두 삭제됩니다.')) { upd(wipe(c)); go('home'); } }}>동의 철회</button>
+        <button className="link" onClick={() => { if (confirm('동의를 철회하면 이 고객의 입력 정보(소득·지출·자산·목표·설문)가 모두 삭제됩니다.')) { upd(wipe()); go('home'); } }}>동의 철회</button>
       </section>
       <Foot>{i < QS.length - 1 ? <button className="btn" disabled={!ok} onClick={() => setI(i + 1)}>다음</button> : <button className="btn" disabled={!ok} onClick={send}>설계사에게 보내기</button>}
         <button className="link" disabled={i === 0} onClick={() => setI(i - 1)}>이전</button></Foot>
     </>
   );
 }
-export const wipe = c => ({ consent: null, survey: null, surveyApplied: false, status: 'before', adopted: null, history: [], events: [], goalList: undefined, spouse: undefined, household: false, recheckInfo: null,
-  income: '', incomeByMonth: Object.fromEntries(Array.from({ length: 12 }, (_, i) => [i + 1, ''])), living: '', loanPay: 0, loanBal: 0, emergency: '', invest: '', goalDeposit: '', goalAmount: '', goalDate: '', psychLimit: '', insurance: { monthly: 0, months: 3 }, work: { shocks: {}, judge: {}, memo: '', record: null, schemes: [] } });
+export const blankFields = () => ({ type: 'fixed', taxShare: 0, income: '', incomeByMonth: Object.fromEntries(Array.from({ length: 12 }, (_, i) => [i + 1, ''])), living: '', loanPay: 0, loanBal: 0, emergency: '', invest: '', goalDeposit: '', goalAmount: '', goalName: '목표', goalDate: '',
+  emergencyMonths: 3, psychLimit: '', grade: '위험중립형', insurance: { monthly: 0, months: 3 }, sonjil: false, hospitalDaily: 0, age: 30, events: [], goalList: undefined, spouse: undefined, household: false, aiAnswers: undefined, aiChosen: undefined, history: [], adopted: null, pick: null, recheckInfo: null,
+  survey: null, consent: null, surveyApplied: false, status: 'before', planA: { alloc: [10, 30, 50, 10] }, planB: { alloc: [40, 50, 0, 10] }, work: { shocks: {}, judge: {}, memo: '', record: null, schemes: [] } });
+export const wipe = () => blankFields(); // 동의 철회: 고객 입력 전체를 빈 상태로
 export function applySurvey(c) {
   const s = c.survey, p = { surveyApplied: true };
   if (s.type === 'fixed' || s.type === 'variable') { p.type = s.type; p.taxShare = s.type === 'fixed' ? 0 : c.taxShare || 0.15; p.emergencyMonths = s.type === 'fixed' ? 3 : 6; }
@@ -274,11 +275,11 @@ const evSum = (n, p) => ({ 결혼: `생활비 +${p.living} / 월`, 출산: `${p.
 const evParams = n => ({ ...TEMPLATES[n], ...(n === '주택 구입' ? { price: 40000, loan: 20000 } : {}) });
 export function Events({ client: c, upd, updWork, go, st }) {
   const evs = c.events || [], has = n => evs.some(e => e.name === n), [msg, setMsg] = useState('');
-  const toggle = n => { setMsg(''); upd({ events: has(n) ? evs.filter(e => e.name !== n) : [...evs, { name: n, ...evParams(n) }] }); };
+  const toggle = n => { setMsg(''); upd(x => ({ events: has(n) ? evs.filter(e => e.name !== n) : [...evs, { name: n, ...evParams(n) }], work: { ...x.work, shocks: Object.fromEntries(Object.entries(x.work.shocks).filter(([t]) => t !== 'event')) } })); };
   const dateOf = e => (e.name === '결혼' ? c.goalDate.replace('-', '.') : e.at > c.months ? `${calLabel(c, e.at).slice(0, 4)} 예정` : calLabel(c, e.at));
   const pts = [...evs].sort((a, b) => a.at - b.at);
   const send = () => {
-    const inn = pts.filter(x => x.at <= c.months && x.name !== '결혼'); // 결혼은 목표(입주) 시점으로 이미 연결돼 있어 시나리오로 보내지 않는다
+    const inn = pts.filter(x => x.at >= 1 && x.at <= c.months && x.name !== '결혼'); // 결혼은 목표(입주) 시점으로 이미 연결돼 있어 시나리오로 보내지 않는다
     if (!inn.length) return setMsg(`시뮬레이션 기간(${c.months}개월) 안에 있는 이벤트가 없습니다. 결혼은 목표와 연결돼 있고, 나머지는 시점을 기간 안으로 줄이면 보낼 수 있습니다.`);
     const sh = c.work.shocks;
     if (!sh.event && Object.keys(sh).length >= 2) return setMsg('시나리오는 최대 2개입니다. ③에서 하나를 해제하세요.');
@@ -297,7 +298,7 @@ export function Events({ client: c, upd, updWork, go, st }) {
           <button key={e.name} className={`evc ${e.name === '결혼' ? 'g' : 'p'}`} onClick={() => go('templates', c.id, e.name)}>
             <div className="row between"><b>{e.name === '결혼' ? '결혼·입주' : e.name}</b><span className="tg">{e.name === '결혼' ? '목표와 연결됨' : e.at > c.months ? '기간 밖 · 시뮬레이션 제외' : '기간 안 · 보내기로 반영'}</span></div>
             {e.name === '결혼' ? <p>{dateOf(e)} · {c.goalName} {comma(c.goalAmount)}만 원 사용 · 이후 생활비 +{e.living}만 원 / 월</p>
-              : <>{e.lump > 0 && <Row l={e.name === '출산' ? '출산 비용' : '목돈 지출'}>{comma(e.lump)}만 원</Row>}{e.living > 0 && <Row l="생활비 변화">+{e.living}만 원 / 월</Row>}{e.incomeMonths > 0 && <Row l="소득 변화">{e.incomePct}% · {e.incomeMonths}개월</Row>}{e.loanAdd > 0 && <Row l="대출 상환">월 {fmt(e.loanAdd)}만 원</Row>}<small className="muted">기본값은 팀 가정 · 고객별로 수정</small></>}
+              : <>{e.lump > 0 && <Row l={e.name === '출산' ? '출산 비용' : '목돈 지출'}>{comma(e.lump)}만 원</Row>}{e.living > 0 && <Row l="생활비 변화">+{e.living}만 원 / 월</Row>}{e.incomeMonths > 0 && <Row l="소득 변화">{e.incomePct}% · {e.incomeMonths}개월</Row>}{e.loanAdd > 0 && <Row l="대출 상환">월 {fmt(e.loanAdd)}만 원</Row>}<small className="muted">고객별로 수정할 수 있습니다</small></>}
           </button>
         ))}
         {pts.length === 0 && <p className="muted center">위 템플릿에서 예정된 일을 골라 주세요</p>}
@@ -316,22 +317,23 @@ export function Templates({ client: c, upd, go, st, nav }) {
   const house = sel === '주택 구입', rate = st.market.loan.value;
   const loan = house ? Math.max(0, (ed.price || 0) - (ed.lump || 0)) : 0, monthly = house && ed.years > 0 ? mortgage(loan, rate, ed.years) : 0;
   const F = (k, l, u) => <Row l={l}><label className="inl"><NumIn aria-label={l} value={ed[k] ?? 0} onChange={v => setEd({ ...ed, [k]: v })} />{u && <span>{u}</span>}</label></Row>;
-  const add = () => { const e = { name: sel, ...ed, ...(house ? { loan, loanAdd: monthly } : {}) }; upd({ events: [...evs.filter(x => x.name !== sel), e] }); go('events'); };
+  const atOk = Number.isInteger(+ed.at) && +ed.at >= 1;
+  const add = () => { if (!atOk) return; const e = { name: sel, ...ed, at: +ed.at, ...(house ? { loan, loanAdd: monthly } : {}) }; upd(x => ({ events: [...evs.filter(y => y.name !== sel), e], work: { ...x.work, shocks: Object.fromEntries(Object.entries(x.work.shocks).filter(([t]) => t !== 'event')) } })); go('events'); };
   return (
     <>
-      <Head back={() => go('events')} backLabel="생애 이벤트" title="이벤트 템플릿" sub="기본값은 팀 가정 · 고객마다 수정합니다" step={1} demo />
+      <Head back={() => go('events')} backLabel="생애 이벤트" title="이벤트 템플릿" sub="고객마다 값을 고칠 수 있습니다" step={1} demo />
       <section className="pad">
         {Object.keys(TEMPLATES).map(n => n !== sel ? (
           <button key={n} className="card tcard" onClick={() => pick(n)}><div className="row between"><b>{n}</b>{n === '결혼' && <span className="tg g">목표(입주자금)와 연결</span>}</div><p className="muted">{evSum(n, { ...evParams(n), ...(evs.find(e => e.name === n) || {}) })}</p></button>
         ) : (
           <div key={n} className="card tcard edit"><div className="row between"><b>{n}</b><span className="tg b">편집 중</span></div>
-            {house ? <>{F('price', '주택 가격', '만 원')}{F('lump', '계약금', '만 원')}<Row l="주택담보대출">{comma(loan)}만 원 · {ed.years || 30}년 원리금균등</Row>{F('years', '상환 기간', '년')}<Row l="대출 금리"><b>{rate}%</b> <small>시장 환경 연동</small></Row><Row l="월 상환액 (자동 계산)"><b className="nv">약 {Math.round(monthly)}만 원</b></Row></>
+            {house ? <>{F('at', '시점', '개월 후')}{F('price', '주택 가격', '만 원')}{F('lump', '계약금', '만 원')}<Row l="주택담보대출">{comma(loan)}만 원 · {ed.years || 30}년 원리금균등</Row>{F('years', '상환 기간', '년')}<Row l="대출 금리"><b>{rate}%</b> <small>시장 환경 연동</small></Row><Row l="월 상환액 (자동 계산)"><b className="nv">약 {Math.round(monthly)}만 원</b></Row></>
               : <>{F('at', '시점', '개월 후')}{F('lump', '목돈 지출', '만 원')}{F('living', '생활비 변화', '만 원/월')}{F('incomePct', '소득 변화', '%')}{F('incomeMonths', '소득 변화 기간', '개월')}{n === '이직' && F('afterPct', '이후 소득 변화', '%')}</>}
           </div>
         ))}
         <p className="muted">이벤트 1개 = 목돈 지출 + 생활비 변화 + 소득 변화 + 대출 상환 변화의 묶음</p>
       </section>
-      <Foot><button className="btn" onClick={add}>이 고객에게 추가</button></Foot>
+      <Foot>{!atOk && <p className="err center">시점은 1 이상의 정수여야 합니다.</p>}<button className="btn" disabled={!atOk} onClick={add}>이 고객에게 추가</button></Foot>
     </>
   );
 }
@@ -339,11 +341,11 @@ export function Templates({ client: c, upd, go, st, nav }) {
 /* ①-6 목표 우선순위 */
 const BADGE = ['#0f9478', '#1e3aaf', '#7c5cc9'];
 export function Goals({ client: c, upd, go, st }) {
-  const goals = c.goalList || [{ name: c.goalName, amount: c.goalAmount, date: c.goalDate }];
+  const goals = [{ name: c.goalName, amount: c.goalAmount, date: c.goalDate }, ...(c.goalList || []).slice(1)]; // 1순위는 메인 목표와 한 데이터
   const [open, setOpen] = useState(null), [drag, setDrag] = useState(null);
   const set = g => {
     const f = g[0], mm = f && /^\d{4}-\d{2}$/.test(f.date || '') ? monthsBetween({ ...c, goalDate: f.date }) : null;
-    upd({ goalList: g, ...(f ? { goalName: f.name, goalAmount: f.amount, goalDate: f.date, ...(mm ? { months: mm } : {}) } : {}) }); // 1순위 목표가 본 시뮬레이션의 목표
+    upd({ goalList: g, goalName: f.name, goalAmount: f.amount, goalDate: f.date, ...(mm ? { months: mm } : {}) }); // 1순위 목표가 본 시뮬레이션의 목표
   };
   const mo = g => { const [y, m] = g.date.split('-').map(Number); return (y - c.startYear) * 12 + (m - c.startMonth) + 1; };
   const ends = goals.map(mo), bad = ends.some(e => !(e >= 1 && e <= 60)), N = Math.min(60, Math.max(...ends, 1));
@@ -397,6 +399,7 @@ export function House({ client: c, upd, go, st }) {
   const set = (k, v) => upd({ spouse: { ...sp, [k]: v } });
   const cc = { ...c, spouse: sp }, stop = [{ type: 'stop', at: 10, len: 3 }];
   const r = (p, hh) => simulate({ client: cc, plan: p, market: toMarket(st.market), shocks: stop, months: c.months, startMonth: c.startMonth, opts: { household: hh } });
+  const spBad = ['income', 'emergency', 'goalDeposit', 'living'].some(k => sp[k] === '' || sp[k] == null || +sp[k] < 0) || !(+sp.living > 0);
   const [Bi, Bh, Ai, Ah] = [r(c.planB, false), r(c.planB, true), r(c.planA, false), r(c.planA, true)];
   const bz = x => (x.bottom ? `${x.bottom}개월째` : '없음');
   return (
@@ -415,9 +418,9 @@ export function House({ client: c, upd, go, st }) {
             <tr><td>{c.goalName} 달성률</td><td>{fmt(Bi.goalPct)}%</td><td className="okc">{fmt(Bh.goalPct)}%</td></tr>
             <tr><td>A안 바닥 시점</td><td className={Ai.bottom ? 'err' : ''}>{bz(Ai)}</td><td>{bz(Ah)}</td></tr></tbody></table></div>
         <Note label="읽는 법">가구로 보면 B안은 {c.goalName}이 남습니다. 연금 비중을 입주 전부터 {c.planA.alloc[3]}%로 되돌릴 여지가 생깁니다.</Note>
-        <p className="muted center">배우자 정보는 배우자 본인 동의 후 입력 · 공동 생활비는 가정값</p>
+        <p className="muted center">배우자 정보는 배우자 본인 동의 후 입력합니다</p>
       </section>
-      <Foot><button className="btn" onClick={() => { upd({ household: mode === 1, spouse: sp }); go('scen'); }}>{mode === 1 ? '가구' : '개인'} 기준으로 시뮬레이션</button></Foot>
+      <Foot>{spBad && <p className="err center">배우자 정보를 모두 입력하고, 공동 생활비는 0보다 커야 합니다.</p>}<button className="btn" disabled={spBad} onClick={() => { upd({ household: mode === 1, spouse: sp }); go('scen'); }}>{mode === 1 ? '가구' : '개인'} 기준으로 시뮬레이션</button></Foot>
     </>
   );
 }
@@ -552,7 +555,7 @@ export function Face({ client: c, go, st }) {
       {kind === 0 && <div className="fcard dark"><div className="row between"><span>일을 쉬는 기간</span><b className="big2">{len}개월</b></div><input type="range" min="1" max="12" value={len} onChange={e => setLen(+e.target.value)} aria-label="일을 쉬는 기간" /><div className="row between"><small>1개월</small><small>12개월</small></div></div>}
       <div className="fcard"><small className="pl">지금 계획대로라면</small><h2>{H(A, false)}</h2><p>{sub(A, false)}</p></div>
       <div className="fcard rec"><small className="gl">추천 계획이라면</small><h2>{H(B, true)}</h2><p>{sub(B, true)}</p></div>
-      <p className="fnote">숫자는 지금 소득과 지출을 그대로 둔 가정입니다</p>
+      <p className="fnote">숫자는 지금 소득과 지출을 그대로 둔 계산입니다</p>
       <div className="ffoot"><button className="btn light" onClick={() => setKind((kind + 1) % 3)}>다른 경우 보기 · {cs.next}</button></div>
     </div>
   );
@@ -580,7 +583,7 @@ export function Retire({ client: c, go, st }) {
         <div className="card"><div className="tr head3 r3"><span /><span>60세 적립액</span><span>현재가치</span></div>
           {[[`A안 · 계속 ${a}%`, R[0]], [`B안 · 입주 후 ${a}% 복귀`, R[1]], [`B안 · ${b}% 유지`, R[2]]].map(([l, r]) => <div className="tr r3" key={l}><span>{l}</span><b>{comma(r.fv)}</b><span className="muted">{comma(r.pv)}</span></div>)}</div>
         <Note label="읽는 법">입주 후 연금 비중을 {a}%로 되돌리면 A안과의 60세 차이는 <b>약 {r10(R[0].fv - R[1].fv)}만 원</b>(현재가치 약 {r10(R[0].pv - R[1].pv)}만 원)입니다. {b}%를 유지하면 차이가 약 {r10(R[0].fv - R[2].fv)}만 원으로 커집니다.</Note>
-        <p className="muted center">소득·지출 현재 수준 유지, 연 {m.pension.value}%, 물가 {m.cpi.value}% 가정<br />이벤트 반영 전 · 시뮬레이션 기간 밖 장기 추정</p>
+        <p className="muted center">소득·지출 현재 수준 유지 기준, 연 {m.pension.value}% 복리, 물가 {m.cpi.value}% 반영<br />시뮬레이션 기간 밖의 장기 전망입니다</p>
       </section>
       <Foot><button className="btn" onClick={() => go('result')}>결과 비교로 돌아가기</button></Foot>
     </>
@@ -617,8 +620,8 @@ export function Prob({ client: c, go, st }) {
         {!res ? <div className="card"><p className="muted center">5,000개 경로를 계산하는 중…</p></div> : <>
           <div className="card">{Q('비상자금이 바닥나지 않을 확률', 'noBottom')}{Q(`${c.goalName} 80% 이상 모일 확률`, 'g80')}{Q(`손실 한도(${c.psychLimit}) 넘을 확률`, 'over')}</div>
           <div className="card"><p className="ttl">비상자금 범위 · 하위 10% ~ 상위 10%</p><Bands res={res} target={c.living * c.emergencyMonths} c={c} /></div>
-          <div className="card sm2"><b>가정</b> 충격 없이 소득·투자수익만 흔들 때 · 월 소득 변동 표준편차 30% · 매달 1% 확률로 3개월 소득 공백 · 투자 연 {st.market.invest.value}%, 변동성 18% · 예금 {st.market.deposit.value}%</div>
-          <p className="muted center">중앙 달성률 A {fmt(res[0].medianGoal)}% · B {fmt(res[1].medianGoal)}% · 확률은 가정에 따라 달라집니다</p></>}
+          <div className="card sm2"><b>산출 조건</b> 충격 없이 소득·투자수익만 흔들 때 · 월 소득 변동 표준편차 30% · 매달 1% 확률로 3개월 소득 공백 · 투자 연 {st.market.invest.value}%, 변동성 18% · 예금 {st.market.deposit.value}%</div>
+          <p className="muted center">중앙 달성률 A {fmt(res[0].medianGoal)}% · B {fmt(res[1].medianGoal)}% · 확률은 조건에 따라 달라집니다</p></>}
       </section>
       <Foot><button className="btn" onClick={() => go('result')}>결과 비교로 돌아가기</button></Foot>
     </>
@@ -626,13 +629,15 @@ export function Prob({ client: c, go, st }) {
 }
 
 /* ⑤ 설명·확인 기록 */
-const RISKS = [['원금 손실 가능성', 'ETF 등 투자상품은 원금이 보장되지 않음'], ['시나리오의 한계', '고정 가정 기반이며 실제와 다를 수 있음'], ['세제 혜택 조건', '연금저축 중도 해지 시 공제액 추징'], ['AI 활용 사실', 'AI 초안을 플래너가 검증·수정함']];
+const RISKS = [['원금 손실 가능성', 'ETF 등 투자상품은 원금이 보장되지 않음'], ['시나리오의 한계', '고정 조건 기반이며 실제와 다를 수 있음'], ['세제 혜택 조건', '연금저축 중도 해지 시 공제액 추징'], ['AI 활용 사실', 'AI 초안을 플래너가 검증·수정함']];
 export function Record({ client: c, updWork, upd, go, st }) {
-  const sig = JSON.stringify([c.planA, c.planB, c.work.shocks, c.adopted]);
+  const ch = c.pick || c.adopted;
+  const { work: _w, history: _h, status: _s, pick: _p, recheckInfo: _r, survey: _sv, consent: _c, aiAnswers: _a, ...inputs } = c;
+  const sig = JSON.stringify([inputs, c.work.shocks, ch, st.market]); // 계산에 쓰는 입력이 하나라도 바뀌면 이전 확인은 무효
   const fresh = { risks: [], confirm: false, note: '', noteOn: false };
   const r = c.work.record && c.work.record.sig === sig ? c.work.record : fresh; // 안이나 시나리오가 바뀌면 이전 설명·확인은 무효
   const set = p => updWork({ record: { ...r, ...p, sig } });
-  const plan = c.adopted === 'A' ? c.planA : c.planB, maxInv = PROFILE_MAX[c.grade], over = plan.alloc[2] > maxInv;
+  const plan = ch === 'A' ? c.planA : c.planB, maxInv = PROFILE_MAX[c.grade], over = plan.alloc[2] > maxInv;
   const ok = r.risks.length === RISKS.length && !!r.confirm && (!r.noteOn || r.note.trim());
   const now = () => { const d = new Date(); return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
   const save = () => {
@@ -646,7 +651,7 @@ export function Record({ client: c, updWork, upd, go, st }) {
     <>
       <Head back={() => go('result')} backLabel="결과 비교" title="설명·확인 기록" sub="채택 전 고객에게 설명한 내용을 남깁니다" step={5} />
       <section className="pad">
-        <div className="card"><p className="ttl">적합성 확인</p><Row l="투자성향"><b>{c.grade}</b></Row><Row l={`${c.adopted}안 고위험 비중`}><b className={over ? 'err' : 'ok'}>{plan.alloc[2]}% · {over ? '부적합' : '적합'}</b></Row>
+        <div className="card"><p className="ttl">적합성 확인</p><Row l="투자성향"><b>{c.grade}</b></Row><Row l={`${ch}안 고위험 비중`}><b className={over ? 'err' : 'ok'}>{plan.alloc[2]}% · {over ? '부적합' : '적합'}</b></Row>
           {over && <p className="err">부적합 안입니다. 고객 확인서를 따로 받거나 안을 수정하세요</p>}</div>
         <div className="card"><p className="ttl">설명한 위험</p>{RISKS.map(([t, d]) => <Chk key={t} t={t} d={d} on={r.risks.includes(t)} onClick={() => set({ risks: r.risks.includes(t) ? r.risks.filter(y => y !== t) : [...r.risks, t] })} />)}</div>
         <div className="card"><p className="ttl">고객 확인</p>
@@ -663,19 +668,21 @@ export function Record({ client: c, updWork, upd, go, st }) {
 /* ⑤-1 선임 검토 */
 export function Review({ client: c, upd, updWork, go, st }) {
   const [op, setOp] = useState(c.work.review?.opinion || '');
-  const plan = adoptedPlan(c), flagged = checkPlan(c, c.planA, st.market).filter(r => r.flag), maxInv = PROFILE_MAX[c.grade];
-  const fixed = flagged.filter(r => c.work.judge[r.id] === 'fix').length, rec = c.work.record;
+  const ch = c.pick || c.adopted, plan = ch === 'A' ? c.planA : c.planB, flagged = checkPlan(c, c.planA, st.market).filter(r => r.flag), maxInv = PROFILE_MAX[c.grade];
+  const { work: _w, history: _h, status: _s, pick: _p, recheckInfo: _r, survey: _sv, consent: _c, aiAnswers: _a, ...inputs } = c;
+  const sigNow = JSON.stringify([inputs, c.work.shocks, ch, st.market]);
+  const fixed = flagged.filter(r => c.work.judge[r.id] === 'fix').length, rec = c.work.record, recOk = !!rec && rec.sig === sigNow && rec.risks?.length === RISKS.length && !!rec.confirm;
   const checks = [
     ['AI 점검 항목 모두 판정', `${flagged.length}건 · ${fixed === flagged.length ? '모두 수정 반영' : `수정 반영 ${fixed}건`}`, flagged.every(r => c.work.judge[r.id])],
     ['시나리오 3개 이상 확인', '6개 · 스트레스 매트릭스', true],
     ['적합성 통과', `${c.grade} · 고위험 ${plan.alloc[2]}%`, plan.alloc[2] <= maxInv],
-    ['설명·확인 기록 완료', `필수 ${RISKS.length + 1}개 · 고객 확인 ${(rec?.confirmAt || '').slice(-5)}`, !!rec?.confirm],
+    ['설명·확인 기록 완료', recOk ? `필수 ${RISKS.length + 1}개 · 고객 확인 ${(rec?.confirmAt || '').slice(-5)}` : '입력이 바뀌어 다시 확인이 필요합니다', recOk],
   ];
   return (
     <>
       <Head back={() => go('record')} backLabel="설명·확인 기록" title="선임 검토" sub="조직에서 쓸 때만 켜지는 단계입니다" step={5} demo />
       <section className="pad">
-        <div className="card row between"><div><small className="muted">검토 요청 · {(rec?.at || '').slice(5, 16) || '-'}</small><h3 className="rq">{c.name} · {c.adopted}안 채택</h3></div><Badge tone="amber">검토 대기</Badge></div>
+        <div className="card row between"><div><small className="muted">검토 요청 · {(rec?.at || '').slice(5, 16) || '-'}</small><h3 className="rq">{c.name} · {ch}안 채택</h3></div><Badge tone="amber">검토 대기</Badge></div>
         <div className="card"><p className="ttl">검토 체크리스트 · 앱이 자동 확인</p>{checks.map(([t, d, ok]) => <div className="chrow static" key={t}><i className={`cb ${ok ? 'on' : 'off'}`} /><div><b>{t}</b><p>{d}</p></div></div>)}</div>
         <div className="card"><p className="ttl">선임 의견</p><textarea rows={3} value={op} onChange={e => setOp(e.target.value)} placeholder="수정 요청 시 필수" aria-label="선임 의견" /></div>
       </section>
@@ -687,7 +694,7 @@ export function Review({ client: c, upd, updWork, go, st }) {
 
 /* ⑤-3 고객용 제안서 */
 export function Proposal({ client: c, go, st }) {
-  const plan = adoptedPlan(c), len = 3, stress = run(c, null, plan, [{ type: 'stop', at: 10, len }], st.market), base = run(c, null, plan, [], st.market);
+  const plan = adoptedPlan(c), len = 3, sAt = Math.max(1, Math.min(10, c.months - 2)), stress = run(c, null, plan, [{ type: 'stop', at: sAt, len }], st.market), base = run(c, null, plan, [], st.market);
   const target = c.living * c.emergencyMonths, now0 = c.emergency / c.living;
   const reach = base.emgArr.findIndex(v => v >= target) + 1, mo = reach > 0 ? reach : null;
   const after = mo ? `약 ${mo >= 12 ? `${Math.floor(mo / 12)}년 ${mo % 12 ? `${mo % 12}개월 ` : ''}` : `${mo}개월 `}뒤 ${c.emergencyMonths}개월` : `${c.emergencyMonths}개월을 향해 쌓는 중`;
@@ -708,7 +715,7 @@ export function Proposal({ client: c, go, st }) {
           {re.invToGoal > 0 && <p className="td">✓ 투자 계좌에서 <b>{comma(re.invToGoal)}만 원</b> → {c.goalName} 예금</p>}
           <p className="td">✓ 매달 남는 돈 {plan.alloc[0] === 50 ? '절반' : plan.alloc[0] === 100 ? '전부' : `${plan.alloc[0]}%`}은 비상금 통장으로</p>
           {picks.length > 0 && <p className="td">✓ 확인해 볼 제도: {picks.join(', ')}</p>}</div>
-        <p className="muted">이 제안은 현재 소득·지출과 가정 수익률에 따른 계산이며 미래 결과를 보장하지 않습니다. 투자상품은 원금 손실이 생길 수 있습니다.</p>
+        <p className="muted">이 제안은 현재 소득·지출과 기대수익률에 따른 계산이며 미래 결과를 보장하지 않습니다. 투자상품은 원금 손실이 생길 수 있습니다.</p>
       </section>
       <Foot><div className="row two"><button className="btn ghost" onClick={() => window.print()}>PDF 저장</button><button className="btn" onClick={share}>카카오톡 공유</button></div></Foot>
     </>
@@ -717,7 +724,7 @@ export function Proposal({ client: c, go, st }) {
 
 /* ⑥ 모니터링 */
 export function Monitor({ client: c, upd, go, st }) {
-  const [el, setEl] = useState(8), [inc, setInc] = useState([120, 100, 110]), [emg, setEmg] = useState(880);
+  const [el, setEl] = useState(8), [inc, setInc] = useState([120, 100, 110]), [emg, setEmg] = useState(880), [invNow, setInvNow] = useState(''), [goalNow, setGoalNow] = useState(''), [inc2, setInc2] = useState(100);
   const plan = adoptedPlan(c), base = run(c, null, plan, [], st.market), n = base.emgArr.length;
   const e = Math.min(Math.max(3, el), n), living = c.living, T = c.emergencyMonths;
   const pl = [0, 1, 2].reduce((s, k) => { const i = e - 3 + k, cal = ((c.startMonth - 1 + i) % 12) + 1; return s + (c.type === 'fixed' ? c.income : c.incomeByMonth[cal]); }, 0);
@@ -729,14 +736,15 @@ export function Monitor({ client: c, upd, go, st }) {
   const actual = base.emgArr.slice(0, e).map((v, i) => (i < e - 3 ? v : prev + ((emg - prev) * (i - (e - 4))) / 3));
   const warnLine = living * (T * 2 / 3);
   const revalidate = () => {
-    const [sy, sm] = calLabel(c, e).split('.').map(Number), strip = p => ({ ...p, realloc: undefined }); // 이미 실행된 재배치는 빼고, 지금 시점부터 남은 기간으로 다시 시작
-    upd({ emergency: emg, startYear: sy, startMonth: sm, months: Math.max(1, c.months - e + 1), planA: strip(c.planA), planB: strip(c.planB), status: 'recheck', recheckInfo: { dec, el: e, at: st.market.asOf }, work: { ...c.work, shocks: {} } });
+    const [sy, sm] = calLabel(c, e + 1).split('.').map(Number), strip = p => ({ ...p, realloc: undefined }); // 이번 달 말 잔액이므로 다음 달부터, 이미 실행된 재배치는 빼고 남은 기간으로 다시 시작
+    const f = inc2 / 100, scale = f === 1 ? {} : c.type === 'fixed' ? { income: Math.round((+c.income || 0) * f) } : { incomeByMonth: Object.fromEntries(Object.entries(c.incomeByMonth || {}).map(([k, v]) => [k, Math.round((+v || 0) * f)])) };
+    upd({ emergency: emg, invest: invNow === '' ? c.invest : invNow, goalDeposit: goalNow === '' ? c.goalDeposit : goalNow, ...scale, startYear: sy, startMonth: sm, months: Math.max(1, c.months - e), planA: strip(c.planA), planB: strip(c.planB), status: 'recheck', recheckInfo: { dec, el: e, at: st.market.asOf }, work: { ...c.work, shocks: {} } });
     go('scen');
   };
   const ticks = [0, 500, 1000, 1500, 2000].filter(v => v <= max);
   return (
     <>
-      <Head back={() => go('report')} backLabel="검증 리포트" title={`모니터링 · ${c.name}`} sub={<><b className="amb">{e}개월 후 예시</b> · {c.adopted || 'B'}안 실행 {e}개월째 · {calLabel(c, e)}</>} step={6} demo />
+      <Head back={() => go('report')} backLabel="검증 리포트" title={`모니터링 · ${c.name}`} sub={<><b className="amb">실행 {e}개월째</b> · {c.adopted || 'B'}안 · {calLabel(c, e)}</>} step={6} demo />
       <section className="pad">
         <div className={`mon l${lv}`}><div><small>현재 경보</small><h2><i style={{ background: COL }} />{lv ? GRADES[lv] : '정상'}</h2></div>{lv > 0 && <span className="rcb">재검증 필요</span>}</div>
         <div className="two2"><div className="card sm3"><small>3개월 소득</small><b style={{ color: COL }}>{dec > 0 ? '−' : '+'}{Math.abs(Math.round(dec * 100))}%</b><span className="muted">실제 {comma(act)} / 계획 {comma(pl)}</span></div>
@@ -750,8 +758,8 @@ export function Monitor({ client: c, upd, go, st }) {
             <text x={L} y={H - 5}>{calLabel(c, 1).slice(2)}</text><text x={x(e - 1)} y={H - 5} textAnchor="middle">{calLabel(c, e).slice(2)} 현재</text><text x={W - 4} y={H - 5} textAnchor="end">{calLabel(c, n).slice(2)}</text></svg></div>
         <div className="card"><p className="ttl">이번 달 입력 · {calLabel(c, e)}</p>
           <div className="grid2"><Field label="실제 소득"><Sfx value={inc[2]} onChange={v => setInc([inc[0], inc[1], v])}>만 원</Sfx></Field><Field label="비상자금 잔액"><Sfx value={emg} onChange={v => setEmg(v === '' ? 0 : v)}>만 원</Sfx></Field></div>
-          <details><summary className="muted">이전 두 달 소득·경과 개월 수정</summary><div className="grid3"><Field label="2개월 전"><NumIn value={inc[0]} onChange={v => setInc([v, inc[1], inc[2]])} /></Field><Field label="1개월 전"><NumIn value={inc[1]} onChange={v => setInc([inc[0], v, inc[2]])} /></Field><Field label="경과(개월)"><NumIn value={el} onChange={v => setEl(v === '' ? 3 : v)} /></Field></div></details></div>
-        <div className="card"><p className="ttl">고객 안내 문구 예시</p><p>{lv > 0 ? `최근 3개월 소득이 계획보다 ${Math.abs(Math.round(dec * 100))}% ${dec > 0 ? '줄었습니다' : '늘었습니다'}. 재량지출을 줄이고 비상자금 이체를 먼저 챙겨 주세요.` : '계획대로 진행 중입니다. 다음 점검까지 지금 방식을 유지해 주세요.'}</p></div>
+          <details><summary className="muted">이전 두 달 소득·현재 자산·향후 소득 전망</summary><div className="grid2"><Field label="현재 투자자산 (비우면 기존 값)"><NumIn value={invNow} onChange={setInvNow} /></Field><Field label="현재 목표 예금 (비우면 기존 값)"><NumIn value={goalNow} onChange={setGoalNow} /></Field></div><Field label="향후 소득 전망 (계획 대비 %)"><NumIn value={inc2} onChange={v => setInc2(v === '' ? 100 : v)} /></Field><div className="grid3"><Field label="2개월 전"><NumIn value={inc[0]} onChange={v => setInc([v, inc[1], inc[2]])} /></Field><Field label="1개월 전"><NumIn value={inc[1]} onChange={v => setInc([inc[0], v, inc[2]])} /></Field><Field label="경과(개월)"><NumIn value={el} onChange={v => setEl(v === '' ? 3 : v)} /></Field></div></details></div>
+        <div className="card"><p className="ttl">고객 안내 문구</p><p>{lv > 0 ? `최근 3개월 소득이 계획보다 ${Math.abs(Math.round(dec * 100))}% ${dec > 0 ? '줄었습니다' : '늘었습니다'}. 재량지출을 줄이고 비상자금 이체를 먼저 챙겨 주세요.` : '계획대로 진행 중입니다. 다음 점검까지 지금 방식을 유지해 주세요.'}</p></div>
       </section>
       <Foot><button className="btn" onClick={revalidate}>현재 잔액으로 재검증</button></Foot>
     </>
@@ -763,7 +771,8 @@ export function commitAdopt(c, st, upd, rec) {
   const h = c.history || [], re = c.status === 'recheck';
   const note = re ? '재검증 채택' : h.length ? '재채택' : '최초 제안';
   const v = re ? `v${Math.floor(h.length ? parseFloat(String(h[h.length - 1].v).replace('v', '')) : 1) + 1}` : h.length ? `v1.${h.length}` : 'v1';
-  upd({ status: 'adopted', history: [...h, snapshot(c, st.market, v, note, { record: rec, memo: c.work.memo, judge: c.work.judge })] });
+  const ch = c.pick || c.adopted;
+  upd({ status: 'adopted', adopted: ch, pick: null, history: [...h, snapshot({ ...c, adopted: ch }, st.market, v, note, { record: rec, memo: c.work.memo, judge: c.work.judge })] });
 }
 export const pick = r => ({ min: r.minMonths, goal: r.goalPct, grade: r.grade });
 export const snapshot = (c, m, v, note, extra = {}) => ({ ...extra, v, note, date: m.asOf, adopted: c.adopted, planA: c.planA, planB: c.planB, n: checkPlan(c, c.planA, m).filter(r => r.flag).length, mA: pick(summary(c, m, c.planA)), mB: pick(summary(c, m, c.planB)) });
@@ -778,43 +787,15 @@ export function History({ client: c, upd, go, st }) {
       <Head back={() => go('report')} backLabel="검증 리포트" title={`제안 이력 · ${c.name}`} sub="버전마다 리포트와 설명 기록이 함께 저장됩니다" step={6} demo />
       <section className="pad">
         {h.length === 0 && <p className="card muted center">아직 채택 기록이 없습니다.</p>}
-        {h.length > 0 && <div className="card tline">{h.map((x, i) => <div className="tv" key={i}><i style={{ background: x.note === '재검증 채택' ? '#e8851a' : '#0f9478' }} /><div className="row between"><b>{x.v} {x.note === '재검증 채택' ? `재검증${c.recheckInfo ? ` · ${c.recheckInfo.el}개월 후 예시` : ''}` : i === 0 ? '최초 제안' : '보완'}</b><span className="muted">{d(x)}</span></div><p className="muted">{desc(x, i)}</p></div>)}</div>}
+        {h.length > 0 && <div className="card tline">{h.map((x, i) => <div className="tv" key={i}><i style={{ background: x.note === '재검증 채택' ? '#e8851a' : '#0f9478' }} /><div className="row between"><b>{x.v} {x.note === '재검증 채택' ? `재검증${c.recheckInfo ? ` · ${c.recheckInfo.el}개월째` : ''}` : i === 0 ? '최초 제안' : '보완'}</b><span className="muted">{d(x)}</span></div><p className="muted">{desc(x, i)}</p></div>)}</div>}
         {h.length > 0 && <div className="card"><Field label="보완 내용"><input value={text} onChange={e => setText(e.target.value)} placeholder="예: 소득보상 보험 검토 의견 추가" /></Field><button className="btn ghost" onClick={supplement}>보완 버전 저장</button></div>}
         {h.length > 1 && <div className="card"><div className="row between"><p className="ttl">버전 비교 · {A.v} → {B.v}</p><span className="row tight"><select className="sel" value={a} onChange={e => setA(+e.target.value)} aria-label="비교 기준 버전">{h.map((x, i) => <option key={i} value={i}>{x.v}</option>)}</select><select className="sel" value={b} onChange={e => setB(+e.target.value)} aria-label="비교 대상 버전">{h.map((x, i) => <option key={i} value={i}>{x.v}</option>)}</select></span></div>
           <table className="cmp"><thead><tr><th /><th>{A.v}</th><th>{B.v}</th></tr></thead><tbody>
             {[['비상자금 비중', 0], ['목표 예금 비중', 1], ['투자 비중', 2], ['연금저축 비중', 3]].map(([l, i]) => <tr key={l}><td>{l}</td><td>{A.planB.alloc[i]}%</td><td className={A.planB.alloc[i] !== B.planB.alloc[i] ? 'nv' : ''}>{B.planB.alloc[i]}%</td></tr>)}
             <tr><td>B 최저 비상자금</td><td>{fmt(A.mB.min, 1)}개월</td><td>{fmt(B.mB.min, 1)}개월</td></tr>
             <tr><td>근거</td><td>{A.note}</td><td>{B.note === '재검증 채택' ? '모니터링 경고' : B.note}</td></tr></tbody></table></div>}
-        {h.length > 1 && <p className="muted center">재검증 값은 절차를 보여주는 예시입니다</p>}
       </section>
       <Foot><button className="btn" onClick={() => go('report')}>최신 리포트 보기</button><button className="link" onClick={() => window.print()}>버전 비교 이미지 저장 (인쇄)</button></Foot>
-    </>
-  );
-}
-
-/* 시연 화면 (외부 연동 필요) */
-const DEMOS = {
-  s8: ['①-1 서류로 자동 입력', 'AI가 값을 찾아 입력칸 후보를 만들고 설계사는 확인만 합니다. AI 추출값은 체크 전에는 어디에도 반영되지 않습니다. (서류 읽기는 AI API 키와 서버 함수가 필요합니다.)'],
-  s9: ['①-1b 마이데이터 연동', '고객 동의로 금융기관 정보를 불러옵니다. 본인신용정보관리업 허가 또는 허가 사업자와의 제휴가 필요합니다. 화면 속 기관명은 가상입니다.'],
-  s3: ['⓪-2b 시장 데이터 자동 갱신', '한국은행 ECOS·KOSIS API로 매일 09:00 조회합니다. API 키 발급과 서버가 필요합니다.'],
-  s5: ['⓪-3b 알림 보내기', '카카오 알림톡 발송입니다. 비즈니스 채널·템플릿 승인·발송 대행 계약이 필요해 지금은 문구 복사로 대신합니다.'],
-};
-export function ShotView({ go, nav }) {
-  const k = nav.arg, [t, d] = DEMOS[k] || ['시연 화면', ''];
-  const back = () => (nav.prev ? go(nav.prev.v, nav.prev.id, nav.prev.arg) : go('home'));
-  return (
-    <>
-      <Head back={back} backLabel="돌아가기" title={t} sub="외부 연동이 필요한 시연 화면" demo />
-      <section className="pad"><img className="shot" src={`/wf/${k}.png`} alt={t} /><p className="muted">{d}</p></section>
-      <Foot><button className="btn" onClick={back}>돌아가기</button></Foot>
-    </>
-  );
-}
-export function Demos({ go }) {
-  return (
-    <>
-      <Head back={() => go('settings')} backLabel="설정" title="시연 화면 모음" sub="외부 연동이 있어야 실제로 작동하는 화면입니다" demo />
-      <section className="pad">{Object.entries(DEMOS).map(([k, [t, d]]) => <button key={k} className="card item" onClick={() => go('shot', null, k)}><div><b>{t}</b><br /><span className="muted">{d.split('.')[0]}.</span></div><span className="chev">›</span></button>)}</section>
     </>
   );
 }

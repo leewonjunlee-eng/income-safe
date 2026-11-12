@@ -66,7 +66,7 @@ export function simulate({ client: c0, plan: plan0, market: m, shocks = [], mont
     let deficit = lump + (avail < 0 ? -avail : 0);
     if (deficit > 0) {
       const fromE = Math.min(emg, deficit); emg -= fromE; deficit -= fromE;
-      if (deficit > 0 && bottom === null) bottom = i + 1; // 비상자금이 0 아래로 내려간 첫 달
+      if ((deficit > 0 || emg <= 1e-9) && fromE > 0 && bottom === null) bottom = i + 1; // 비상자금이 0 아래로(또는 정확히 0으로) 내려간 첫 달
       if (deficit > 0) { const f = Math.min(inv, deficit); inv -= f; forced += f; deficit -= f; }
       for (let k = 0; k < gb.length && deficit > 0; k++) { const g = Math.min(gb[k], deficit); gb[k] -= g; deficit -= g; }
       if (deficit > 0.5) shortfall += deficit; // 자산을 모두 써도 모자란 돈
@@ -117,7 +117,7 @@ export function monteCarlo({ client: c, plans, market: m, months, startMonth, se
       if (!r.bottom) o.noBottom++;
       if (r.goalPct >= 80) o.g80++;
       if (r.goalPct >= 100) o.g100++;
-      if (r.forced > c.psychLimit) o.over++;
+      if (r.overLimit) o.over++;
       o.goals.push(r.goalPct); o.emg.push(r.emgArr);
     });
   }

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Head, Foot, Dot, Field, NumIn, Slider, Seg, Sfx, calLabel, fmt, comma, LABEL, shocksOf, summary, Chart, copyText, evName, shockOk } from './ui.jsx';
 import * as X from './Wire.jsx';
-import { checkPlan, monthsBetween, SCENARIOS, toShock, run, GRADE_LIST, PROFILE_MAX } from './rules.js';
+import { checkPlan, monthsBetween, inputProblems, SCENARIOS, toShock, run, GRADE_LIST, PROFILE_MAX } from './rules.js';
 
 
 const Row2 = ({ l, sub, err, children }) => <div className="kv2"><div><b>{l}</b>{sub && <small>{sub}</small>}{err && <small className="err">{err}</small>}</div><div className="v">{children}</div></div>;
@@ -27,7 +27,7 @@ export function Info({ client: c, upd, go, st }) {
     empty(c.goalAmount) || +c.goalAmount <= 0 || !c.goalName || mo == null || empty(c.emergencyMonths) || +c.emergencyMonths <= 0 || empty(c.psychLimit),
     false,
   ];
-  const ok = !errs.some(Boolean);
+  const problems = inputProblems(c), ok = !errs.some(Boolean) && problems.length === 0;
   const target = c.living * c.emergencyMonths, totalAssets = (+c.emergency || 0) + (+c.invest || 0) + (+c.goalDeposit || 0);
   const incs = c.type === 'variable' ? Array.from({ length: 12 }, (_, i) => +(c.incomeByMonth || {})[i + 1] || 0) : [];
   const sum = incs.reduce((a, b) => a + b, 0), avg = sum / 12, min = Math.min(...incs);
@@ -40,6 +40,7 @@ export function Info({ client: c, upd, go, st }) {
       <Head back={() => go('home')} backLabel="고객" title={`고객 정보 · ${c.name}`} sub="시뮬레이션 기준값을 확인하세요" step={1} />
       <section className="pad">
         <Seg items={['소득', '지출', '자산', '목표', '보험·성향'].map((t, i) => ({ label: t, dot: errs[i] }))} value={tab} onChange={setTab} />
+        {problems.length > 0 && <div className="note2 amber"><b>다음 단계로 가려면</b> {problems.join(', ')} 항목을 확인해 주세요.</div>}
         {c.survey && !c.surveyApplied && <div className="panel blue"><b>사전 설문 도착</b><p className="muted">고객이 입력한 답변은 초안입니다. 확인 후 반영하세요.</p><button className="btn sm" onClick={() => upd(X.applySurvey(c))}>설문 답변을 입력칸에 반영</button></div>}
         {tab === 0 && <>
           <div className="card"><p className="ttl">소득 유형</p>
@@ -87,7 +88,8 @@ export function Info({ client: c, upd, go, st }) {
             <p className="muted">표준 투자성향 5단계 · <button className="lnk" onClick={() => c.consent ? go('survey') : go('consent')}>설문 다시 하기</button></p></div>
           {totalAssets > 0 && c.psychLimit < totalAssets * 0.15 && <div className="note2 purple"><b>행동 체크</b> 설문은 {c.grade}이지만, 손실 한도가 총자산의 약 {Math.round((c.psychLimit / totalAssets) * 100)}%로 낮아 실제 손실 회피 성향이 강합니다.</div>}
         </>}
-        <div className="row two"><button className="chip" onClick={() => go('shot', c.id, 's8')}>서류로 자동 입력 (시연)</button></div>
+        <div className="row two"><button className="chip" onClick={() => go('docs')}>서류로 자동 입력</button></div>
+        <div className="row two"><button className="chip" onClick={() => go('mydata')}>계좌 정보로 채우기</button></div>
         <div className="row two"><button className="chip" onClick={() => go('events')}>생애 이벤트</button><button className="chip" onClick={() => go('goals')}>목표 우선순위</button><button className="chip" onClick={() => go('house')}>가구 단위</button></div>
       </section>
       <Foot>
@@ -148,7 +150,7 @@ export function Plan({ client: c, upd, updWork, go, st }) {
 
 /* ③ 시나리오 선택 */
 export function Scen({ client: c, updWork, go, st }) {
-  const sel = c.work.shocks, n = Object.keys(sel).length;
+  const sel = c.work.shocks, n = Object.keys(sel).filter(t => shockOk(c, t)).length;
   const [msg, setMsg] = useState('');
   const toggle = t => {
     const s = { ...sel };
@@ -156,7 +158,7 @@ export function Scen({ client: c, updWork, go, st }) {
     setMsg(''); updWork({ shocks: s });
   };
   const setP = (t, patch) => updWork({ shocks: { ...sel, [t]: { ...sel[t], ...patch } } });
-  const errs = Object.entries(sel).filter(([t, p]) => shockOk(c, t) && !Array.isArray(p) && (p.at < 1 || p.at > c.months)).map(([t]) => `${SCENARIOS[t].name}: 기간(${c.months}개월) 안으로 입력해 주세요`);
+  const errs = Object.entries(sel).filter(([t, p]) => shockOk(c, t) && (Array.isArray(p) ? p.some(e => !(e.at >= 1 && e.at <= c.months)) : !(p.at >= 1 && p.at <= c.months))).map(([t]) => `${SCENARIOS[t].name}: 기간(${c.months}개월) 안으로 입력해 주세요`);
   const endLabel = (p, len) => calLabel(c, Math.min(c.months, p.at + len - 1));
   const Row = ({ l, r, children }) => <div className="srow"><div className="row between"><span className="muted">{l}</span><span className="rv">{r}</span></div>{children}</div>;
   const body = {
@@ -190,7 +192,7 @@ export function Scen({ client: c, updWork, go, st }) {
           ? <div className="scard col on"><button className="shead" onClick={() => toggle('event')}><i className="cb on" /><div><b>생애 이벤트 · {evName(sel.event)}</b><p className="muted">{(Array.isArray(sel.event) ? sel.event : [sel.event]).map(e => `${e.name} ${e.at}개월 후`).join(' · ')}</p></div></button></div>
           : <button className="scard" onClick={() => go('events')}><div><b>생애 이벤트 · 금리 상승</b><p className="muted">출산 템플릿 · 금리 상승은 대출 고객만</p></div><span>›</span></button>}
         {msg && <p className="err">{msg}</p>}{errs.map(e => <p key={e} className="err">{e}</p>)}
-        <p className="muted center">시뮬레이션 기간 {c.months}개월 ({calLabel(c, 1)} ~ {calLabel(c, c.months)}) · 수익률은 고정 가정</p>
+        <p className="muted center">시뮬레이션 기간 {c.months}개월 ({calLabel(c, 1)} ~ {calLabel(c, c.months)}) · 수익률은 고정</p>
       </section>
       <Foot><button className="btn" disabled={errs.length > 0} onClick={() => go('result')}>비교하기</button></Foot>
     </>
@@ -210,7 +212,7 @@ export function Result({ client: c, updWork, upd, go, st }) {
     ['목표 달성률', `${fmt(A.goalPct)}%`, `${fmt(B.goalPct)}%`],
   ];
   const sentence = `A안은 ${A.bottom ? `${A.bottom}개월째에 비상자금이 바닥나 ${fmt(A.forced)}만원을 팔아야 하고${A.overLimit ? `, 고객 한도 ${c.psychLimit}만원을 넘습니다` : ''}` : `비상자금이 바닥나지 않지만 최저 ${fmt(A.minMonths, 1)}개월까지 내려갑니다`}. B안은 ${B.bottom ? `${B.bottom}개월째에 바닥납니다` : `바닥 없이 최저 ${fmt(B.minMonths, 1)}개월을 유지합니다`}.`;
-  const choose = w => { upd({ adopted: w }); go('record'); };
+  const choose = w => { upd({ pick: w }); go('record'); };
   const active = Object.entries(c.work.shocks).filter(([t]) => shockOk(c, t));
   const title = active.map(([t, p]) => (t === 'event' ? `생애 이벤트(${evName(p)})` : SCENARIOS[t].name)).join(' + ') || '충격 없음';
   const sub = active.map(([t, p]) => (!Array.isArray(p) && p.at ? `${p.at}개월 후 시작` : '')).filter(Boolean)[0];
@@ -243,13 +245,13 @@ export function Result({ client: c, updWork, upd, go, st }) {
 /* ⑤-2 리포트 */
 export function Report({ client: c, go, st }) {
   const m = st.market;
-  const plan = c.adopted === 'A' ? c.planA : c.planB;
-  const base = [['충격 없음', []], ['소득 정지 3개월', [['stop', { at: 10 }]]], ['목돈 지출 500', [['lump']]], ['급락 2022형 −35%', [['crash']]]];
+  const plan = c.adopted === 'A' ? c.planA : c.planB, sAt = Math.max(1, Math.min(10, c.months - 2));
+  const base = [['충격 없음', []], ['소득 정지 3개월', [['stop', { at: sAt }]]], ['목돈 지출 500', [['lump']]], ['급락 2022형 −35%', [['crash']]]];
   if (c.type === 'variable') base.splice(1, 0, ['소득 감소 −40%', [['cut']]]);
   if (c.loanBal > 0) base.push(['금리 +1%p', [['rate']]]);
-  base.push(['소득 정지 + 2022형', [['stop', { at: 10 }], ['crash', { at: 10 }]]]);
+  base.push(['소득 정지 + 2022형', [['stop', { at: sAt }], ['crash', { at: sAt }]]]);
   const matrix = base.map(([name, ss]) => {
-    const sh = ss.map(([t, o]) => toShock(t, { ...SCENARIOS[t].def, ...o }, m));
+    const sh = ss.map(([t, o]) => toShock(t, { ...SCENARIOS[t].def, ...o, ...(t === 'lump' || t === 'crash' ? { at: Math.min((o && o.at) || SCENARIOS[t].def.at, c.months) } : {}) }, m));
     const f = p => run(c, null, p, sh, m);
     return [name, f(c.planA), f(c.planB)];
   });
@@ -262,7 +264,7 @@ export function Report({ client: c, go, st }) {
     <>
       <Head back={() => go('home')} backLabel="대시보드" title={`검증 리포트 · ${c.name}`} sub={`확정 ${c.work.record?.atISO ? c.work.record.atISO.replace(/-/g, '.') : '-'} · 시장 기준일 ${m.asOf.replace(/-/g, '.')}`} step={6} />
       <section className="pad report">
-        {!c.adopted && <p className="warn">아직 채택하지 않았습니다. ④에서 채택을 확정하세요.</p>}
+        {c.status !== 'adopted' && <p className="warn">{c.status === 'recheck' ? '정보나 시장 값이 바뀌어 재검증이 필요합니다. 아래 내용은 이전에 확정한 리포트입니다.' : '아직 채택을 마치지 않았습니다. 설명·확인 기록(선임 검토 포함)을 끝내면 확정됩니다.'}</p>}
         <div className="adopt"><div><small>채택안</small><h2>{c.adopted || '-'}안 · {c.adopted === 'A' ? 'AI 원안' : '수정안'}</h2></div><div className="r"><small>AI 원안 점검 {judges.length}건</small><b>{judges.length === 0 ? '해당 없음' : fixed === judges.length ? '모두 수정 반영' : `수정 반영 ${fixed}건`}</b></div></div>
         <div className="card"><p className="ttl">A → B 변경점</p><div className="chg">{changes.map(([l, a, b]) => <span key={l}>{l} <b>{a} → {b}%</b></span>)}</div>
           {reAmt > 0 && <p className="sm">투자자산 {reAmt}만 원을 비상자금·목표 예금으로 재배치</p>}</div>
@@ -275,7 +277,7 @@ export function Report({ client: c, go, st }) {
         {c.aiChosen && <p className="muted">A안 출처: {c.aiChosen} (AI 답변 비교 점검 기록)</p>}
         <div className="card"><p className="ttl">플래너 판단 메모</p><p>{c.work.memo || '-'}</p>
           {c.work.record && <><p className="ttl" style={{ marginTop: 10 }}>설명·확인 기록</p><p className="sm">{c.work.record.risks.join(', ')} · 고객 확인 {c.work.record.confirm ? '완료' : '미완'}</p>{c.work.record.note && <p className="muted">질문: {c.work.record.note}</p>}</>}</div>
-        <p className="muted center sm">{riskB > 0 ? `B안도 일부 시나리오에서는 위험 단계 → 모니터링 필요` : 'B안은 모든 시나리오에서 위험 단계를 피합니다'}<br />시장 기준일 {m.asOf.replace(/-/g, '.')} · 투자·연금 수익률은 팀 가정 · 시나리오는 예측이 아닌 비교용</p>
+        <p className="muted center sm">{riskB > 0 ? `B안도 일부 시나리오에서는 위험 단계 → 모니터링 필요` : 'B안은 모든 시나리오에서 위험 단계를 피합니다'}<br />시장 기준일 {m.asOf.replace(/-/g, '.')} · 시나리오는 예측이 아닌 비교용</p>
         <div className="row two noprint"><button className="chip" onClick={() => go('history')}>제안 이력</button><button className="chip" onClick={() => window.print()}>PDF 저장</button></div>
       </section>
       <Foot><div className="row two"><button className="btn ghost" onClick={() => go('proposal')}>고객용 제안서</button><button className="btn" onClick={() => go('monitor')}>모니터링 시작</button></div></Foot>

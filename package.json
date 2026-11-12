@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "node src/engine.test.js && node src/rules.test.js && node src/ext.test.js"
+    "test": "node src/engine.test.js && node src/rules.test.js && node src/ext.test.js && node src/api.test.js"
   },
   "dependencies": {
     "react": "^18.3.1",

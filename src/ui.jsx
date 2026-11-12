@@ -8,7 +8,7 @@ export const STATUS = { recheck: '재검증 필요', inprogress: '검증 진행 
 
 export const Steps = ({ n }) => <div className="steps">{[1, 2, 3, 4, 5, 6].map(i => <i key={i} className={i <= n ? 'on' : ''} />)}</div>;
 export const Status = ({ demo }) => (
-  <div className={`status ${demo ? 'has-chip' : ''}`}><b>9:41</b>{demo && <span className="demochip">시연 화면</span>}<i className="batt" /></div>
+  <div className="status"><b>9:41</b><i className="batt" /></div>
 );
 export const Head = ({ back, title, sub, step, backLabel = '뒤로', right, demo, dark }) => (
   <header className={`head ${dark ? 'dark' : ''}`}>
