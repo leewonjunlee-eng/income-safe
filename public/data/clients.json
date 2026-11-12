@@ -1,0 +1,130 @@
+[
+  {
+    "id": "seoyun",
+    "name": "서윤",
+    "job": "크리에이터",
+    "type": "variable",
+    "status": "inprogress",
+    "incomeByMonth": {
+      "1": 400,
+      "2": 400,
+      "3": 550,
+      "4": 400,
+      "5": 160,
+      "6": 160,
+      "7": 160,
+      "8": 400,
+      "9": 400,
+      "10": 400,
+      "11": 550,
+      "12": 550
+    },
+    "taxShare": 0.15,
+    "living": 248,
+    "loanPay": 0,
+    "loanBal": 0,
+    "emergency": 600,
+    "invest": 1000,
+    "goalDeposit": 1500,
+    "goalAmount": 3000,
+    "goalName": "입주자금",
+    "goalDate": "2028-04",
+    "startMonth": 12,
+    "startYear": 2026,
+    "months": 17,
+    "emergencyMonths": 6,
+    "psychLimit": 300,
+    "grade": "위험중립형",
+    "insurance": {
+      "monthly": 0,
+      "months": 3
+    },
+    "planA": {
+      "alloc": [
+        10,
+        20,
+        50,
+        20
+      ]
+    },
+    "planB": {
+      "alloc": [
+        50,
+        35,
+        0,
+        15
+      ],
+      "realloc": {
+        "invToEmerg": 400,
+        "invToGoal": 300
+      }
+    },
+    "age": 27,
+    "spouse": {
+      "income": 280,
+      "emergency": 500,
+      "goalDeposit": 1000,
+      "living": 400
+    },
+    "goalList": [
+      {
+        "name": "입주자금",
+        "amount": 3000,
+        "date": "2028-04"
+      },
+      {
+        "name": "자동차",
+        "amount": 1200,
+        "date": "2030-12"
+      }
+    ]
+  },
+  {
+    "id": "minjun",
+    "name": "민준",
+    "job": "직장인",
+    "type": "fixed",
+    "status": "before",
+    "income": 300,
+    "taxShare": 0,
+    "living": 180,
+    "loanPay": 30,
+    "loanBal": 3000,
+    "emergency": 300,
+    "invest": 500,
+    "goalDeposit": 1000,
+    "goalAmount": 3000,
+    "goalName": "목표",
+    "goalDate": "2028-12",
+    "startMonth": 12,
+    "startYear": 2026,
+    "months": 24,
+    "emergencyMonths": 3,
+    "psychLimit": 200,
+    "grade": "위험중립형",
+    "insurance": {
+      "monthly": 0,
+      "months": 3
+    },
+    "planA": {
+      "alloc": [
+        10,
+        30,
+        50,
+        10
+      ]
+    },
+    "planB": {
+      "alloc": [
+        40,
+        50,
+        0,
+        10
+      ],
+      "realloc": {
+        "invToEmerg": 200
+      }
+    },
+    "age": 30
+  }
+]
