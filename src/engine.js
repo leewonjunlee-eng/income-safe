@@ -3,10 +3,15 @@ export const GRADES = ['정상', '주의', '경고', '위험'];
 
 // shock: {type:'stop'|'cut'|'lump'|'crash'|'rate'|'event', at:N(N개월 후), ...}
 // opts: {household, goals:[{name,amount,end}], rand:{mult,gap,ret}}
-export function simulate({ client: c, plan, market: m, shocks = [], months, startMonth, opts = {} }) {
+const num = x => (Number.isFinite(+x) ? +x : 0); // 빈 칸·문자열은 0으로
+export function simulate({ client: c0, plan: plan0, market: m, shocks = [], months, startMonth, opts = {} }) {
   const n = months;
+  const c = { ...c0, income: num(c0.income), living: num(c0.living), loanPay: num(c0.loanPay), loanBal: num(c0.loanBal), emergency: num(c0.emergency), invest: num(c0.invest), goalDeposit: num(c0.goalDeposit), taxShare: num(c0.taxShare), goalAmount: num(c0.goalAmount), psychLimit: num(c0.psychLimit), emergencyMonths: num(c0.emergencyMonths),
+    incomeByMonth: c0.incomeByMonth && Object.fromEntries(Object.entries(c0.incomeByMonth).map(([k, v]) => [k, num(v)])), insurance: c0.insurance && { monthly: num(c0.insurance.monthly), months: num(c0.insurance.months) },
+    spouse: c0.spouse && Object.fromEntries(Object.entries(c0.spouse).map(([k, v]) => [k, num(v)])) };
+  const plan = { ...plan0, alloc: plan0.alloc.map(num), realloc: plan0.realloc && Object.fromEntries(Object.entries(plan0.realloc).map(([k, v]) => [k, num(v)])) };
   const hh = opts.household && c.spouse ? c.spouse : null;
-  const baseLiving = hh ? hh.living : c.living;
+  const baseLiving = (hh ? hh.living : c.living) || 1; // 0으로 나누지 않도록
   const alloc = plan.alloc.map(x => x / 100); // 비상/목표/투자/연금
   const goals = opts.goals?.length ? opts.goals : [{ name: c.goalName, amount: c.goalAmount, end: n }];
   const gb = goals.map(() => 0), gpct = goals.map(() => null);
@@ -16,17 +21,17 @@ export function simulate({ client: c, plan, market: m, shocks = [], months, star
   emg += re.invToEmerg || 0; gb[0] += re.invToGoal || 0; inv -= (re.invToEmerg || 0) + (re.invToGoal || 0);
 
   const planInc = [], actInc = [], emgArr = [];
-  let forced = 0, crashLoss = 0, bottom = null, minMonths = Infinity, maxGrade = 0, planPos = 0;
+  let forced = 0, shortfall = 0, crashLoss = 0, bottom = null, minMonths = Infinity, maxGrade = 0, planPos = 0;
 
   for (let i = 0; i < n; i++) {
     const calM = ((startMonth - 1 + i) % 12) + 1;
     const base = c.type === 'fixed' ? c.income : c.incomeByMonth[calM];
-    let inc = base, living = baseLiving, loan = c.loanPay || 0, lump = 0, insurance = 0, crash = 0;
+    let inc = base, stopped = false, living = baseLiving, loan = c.loanPay || 0, lump = 0, insurance = 0, crash = 0;
     if (opts.rand) { inc = base * opts.rand.mult[i]; if (opts.rand.gap[i]) inc = 0; }
     for (const s of shocks) {
       const k = i - (s.at - 1);
       if (s.type === 'stop' && k >= 0 && k < s.len) {
-        inc = 0;
+        stopped = true;
         if (c.insurance && k < c.insurance.months) insurance = Math.min(c.insurance.monthly, base * (1 - c.taxShare));
       }
       if (s.type === 'cut' && k >= 0 && k < s.len) inc = base * (1 - s.drop);
@@ -42,6 +47,7 @@ export function simulate({ client: c, plan, market: m, shocks = [], months, star
         else if (s.afterPct) inc = inc * (1 + s.afterPct / 100);
       }
     }
+    if (stopped) inc = 0; // 정지는 감소·이벤트보다 우선 (선택 순서와 무관)
     planInc.push(base); actInc.push(inc);
 
     if (crash) { const l = inv * crash; inv -= l; crashLoss += l; }
@@ -60,15 +66,17 @@ export function simulate({ client: c, plan, market: m, shocks = [], months, star
     let deficit = lump + (avail < 0 ? -avail : 0);
     if (deficit > 0) {
       const fromE = Math.min(emg, deficit); emg -= fromE; deficit -= fromE;
-      if (deficit > 0) { const f = Math.min(inv, deficit); inv -= f; forced += f; deficit -= f; if (f > 0 && bottom === null) bottom = i + 1; }
+      if (deficit > 0 && bottom === null) bottom = i + 1; // 비상자금이 0 아래로 내려간 첫 달
+      if (deficit > 0) { const f = Math.min(inv, deficit); inv -= f; forced += f; deficit -= f; }
       for (let k = 0; k < gb.length && deficit > 0; k++) { const g = Math.min(gb[k], deficit); gb[k] -= g; deficit -= g; }
+      if (deficit > 0.5) shortfall += deficit; // 자산을 모두 써도 모자란 돈
     }
     emg *= 1 + m.deposit / 12;
     for (let k = 0; k < gb.length; k++) gb[k] *= 1 + m.deposit / 12;
     inv *= 1 + (opts.rand ? opts.rand.ret[i] : m.invest / 12);
     pen *= 1 + m.pension / 12;
     // 기한이 된 달 끝에 그 목표를 사용 처리
-    goals.forEach((g, k) => { if (g.end === i + 1 && gpct[k] === null) { gpct[k] = (gb[k] / g.amount) * 100; gb[k] = 0; } });
+    goals.forEach((g, k) => { if (g.end === i + 1 && gpct[k] === null) { gpct[k] = g.amount > 0 ? (gb[k] / g.amount) * 100 : 0; gb[k] = 0; } });
 
     emgArr.push(emg);
     const em = emg / baseLiving; minMonths = Math.min(minMonths, em);
@@ -82,9 +90,8 @@ export function simulate({ client: c, plan, market: m, shocks = [], months, star
     if (dec >= 0.5 || em < T / 3) g = 3;
     maxGrade = Math.max(maxGrade, g);
   }
-  const loss = forced + crashLoss;
   return {
-    bottom, minMonths, forced, crashLoss, loss, overLimit: loss > c.psychLimit,
+    bottom, minMonths, forced, shortfall, crashLoss, loss: forced + shortfall + crashLoss, overLimit: forced + shortfall + crashLoss > c.psychLimit,
     goalPct: gpct[0] ?? 0, goalPcts: gpct.map(x => x ?? 0), maxGrade, grade: GRADES[maxGrade], emgArr, planPos, pension: pen,
   };
 }

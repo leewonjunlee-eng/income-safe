@@ -14,7 +14,7 @@ export function annualPlus(c, m, startMonth = c.startMonth) {
 // 목표 시점 → 개월 수 (시작월 기준). 1~60 밖이면 null
 export function monthsBetween(c) {
   const [y, mo] = c.goalDate.split('-').map(Number);
-  const n = (y - c.startYear) * 12 + (mo - c.startMonth);
+  const n = (y - c.startYear) * 12 + (mo - c.startMonth) + 1; // 시작 달 포함
   return n >= 1 && n <= 60 ? n : null;
 }
 
@@ -30,12 +30,12 @@ export function checkPlan(c, plan, m) {
   const rules = [
     ['pensionLimit', '연금 한도', penYear > 600, `연금저축 연 납입 추정 ${penYear.toFixed(0)} (한도 600, IRP 합산 900)`],
     ['taxCredit', '세액공제액', plan.aiCredit != null && plan.aiCredit !== '' && Math.abs(plan.aiCredit - penYear * rate) > penYear * rate * 0.1,
-      `AI 공제액 ${plan.aiCredit || '-'} vs 계산 ${(penYear * rate).toFixed(0)} (공제율 16.5%)`],
+      `AI 답변 ${plan.aiCredit || '-'}만 원 / 계산값 약 ${(penYear * rate).toFixed(0)}만 원 (연 납입 ${penYear.toFixed(0)} × 16.5%)`],
     ['isaLimit', 'ISA 한도', isaYear > 2000, `ISA 연 납입 추정 ${isaYear.toFixed(0)} (한도 2,000)`],
-    ['emergency', '비상자금 부족', c.emergency + (plan.realloc?.invToEmerg || 0) < emgTarget && inv >= 50, `비상자금 ${c.emergency} < 목표 ${emgTarget}, 투자 비중 ${inv}%`],
-    ['period', '기간 불일치', c.months <= 18 && inv >= 50, `목표까지 ${c.months}개월, 투자 비중 ${inv}%`],
+    ['emergency', '비상자금 부족', c.emergency + (plan.realloc?.invToEmerg || 0) < emgTarget && inv >= 50, `현재 ${(c.emergency / c.living).toFixed(1)}개월분(목표 ${c.emergencyMonths}개월)인데 투자 ${inv}%`],
+    ['period', '기간 불일치', c.months <= 18 && inv >= 50, `목표까지 ${c.months}개월인데 투자 ${inv}%`],
     ['repay', '상환 부담', (c.loanPay || 0) > avgInc * 0.4, `월 상환 ${c.loanPay || 0} / 월평균 소득 ${avgInc.toFixed(0)}`],
-    ['suit', '적합성 초과', inv > maxInv, `투자 ${inv}% > ${c.grade} 허용 ${maxInv}%`],
+    ['suit', '적합성 초과', inv > maxInv, `${c.grade} 허용 ${maxInv}% < 고위험 ${inv}%`],
   ];
   return rules.map(([id, label, flag, detail]) => ({ id, label, flag, detail }));
 }
@@ -59,7 +59,7 @@ export function toShock(type, p, m) {
 
 export function run(c, which, plan, shocks, m) {
   const cc = { ...c, insurance: c.insurance };
-  return simulate({ client: cc, plan, market: toMarket(m), shocks, months: c.months, startMonth: c.startMonth });
+  return simulate({ client: cc, plan, market: toMarket(m), shocks, months: c.months, startMonth: c.startMonth, opts: { household: !!(c.household && c.spouse) } });
 }
 
 /* ④-2 안전선 찾기: 바닥이 사라지는 첫 값 (3가지 방법) */
@@ -85,19 +85,19 @@ export function safetyLine(c, m, shocks) {
 /* ②-3 상품·세제 */
 export function products(c, m, plan) {
   const ap = annualPlus(c, m), [e, g, i, p] = plan.alloc.map(x => (ap * x) / 100);
-  return { parking: e, deposit: g, isa: i, pension: p, credit: p * 0.165 };
+  return { parking: e, deposit: g, isa: i, pension: p, credit: Math.min(p, 600) * 0.165 }; // 연금저축 공제 대상 한도 600
 }
 
 /* ④-4 노후 장기 전망: 60세까지 월 납입 × 연 4% 복리, 현재가치는 물가로 할인 */
 export function retirement(c, m, share, shareAfter, switchMonth = 0) {
   const base = annualPlus(c, m) / 12, r = m.pension.value / 100 / 12, years = 60 - c.age, N = years * 12;
-  let fv = 0;
-  for (let t = 0; t < N; t++) fv = (fv + (base * (t < switchMonth ? share : shareAfter)) / 100) * (1 + r);
-  return { fv, pv: fv / Math.pow(1 + m.cpi.value / 100, years) };
+  let fv = 0; const series = [0];
+  for (let t = 0; t < N; t++) { fv = (fv + (base * (t < switchMonth ? share : shareAfter)) / 100) * (1 + r); if ((t + 1) % 12 === 0) series.push(fv); }
+  return { fv, pv: fv / Math.pow(1 + m.cpi.value / 100, years), series };
 }
 
 /* ①-5b 이벤트 템플릿 (팀 가정). 주택 구입 월 상환 = 대출금 × r ÷ (1 − (1 + r)^−n) */
-export const mortgage = (loan, rate, years) => { const r = rate / 100 / 12, n = years * 12; return (loan * r) / (1 - Math.pow(1 + r, -n)); };
+export const mortgage = (loan, rate, years) => { const r = rate / 100 / 12, n = years * 12; if (!(n > 0)) return 0; return r === 0 ? loan / n : (loan * r) / (1 - Math.pow(1 + r, -n)); };
 export const TEMPLATES = {
   결혼: { at: 18, lump: 0, living: 40, incomePct: 0, incomeMonths: 0, note: '목표(입주자금)와 연결' },
   출산: { at: 12, lump: 300, living: 60, incomePct: -25, incomeMonths: 12 },
