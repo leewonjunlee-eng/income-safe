@@ -44,7 +44,7 @@ async function kosisCpi() {
 
 async function kospi() {
   const raw = process.env.DATA_GO_KR_KEY, key = raw.includes('%') ? raw : encodeURIComponent(raw); // 인코딩된 키/디코딩된 키 모두 허용
-  const url = `https://apis.data.go.kr/1160100/service/GetMarketIndexInfoService/getStockMarketIndex?serviceKey=${key}&resultType=json&numOfRows=300&idxNm=${encodeURIComponent('코스피')}&beginBasDt=${ymd(back(370, 'd'))}`;
+  const url = `https://apis.data.go.kr/1160100/GetMarketIndexInfoService_V2/getStockMarketIndex_V2?serviceKey=${key}&resultType=json&numOfRows=300&idxNm=${encodeURIComponent('코스피')}&beginBasDt=${ymd(back(370, 'd'))}`;
   const v = parseKospi(await getJson(url));
   if (!v) throw new Error('값이 없습니다');
   return v;
