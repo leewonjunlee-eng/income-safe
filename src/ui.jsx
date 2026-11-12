@@ -7,12 +7,17 @@ export const LABEL = ['비상자금', '목표 예금', '투자', '연금'];
 export const STATUS = { recheck: '재검증 필요', inprogress: '검증 진행 중', before: '검증 전', adopted: '채택 완료' };
 
 export const Steps = ({ n }) => <div className="steps">{[1, 2, 3, 4, 5, 6].map(i => <i key={i} className={i <= n ? 'on' : ''} />)}</div>;
-export const Head = ({ back, title, sub, step }) => (
+export const Head = ({ back, title, sub, step, backLabel = '뒤로' }) => (
   <header className="head">
-    <div className="row between"><button className="back" onClick={back}>‹ 뒤로</button>{step && <Steps n={step} />}</div>
-    <h1>{title}</h1>{sub && <p className="muted">{sub}</p>}
+    <div className="row between"><button className="back" onClick={back}>‹ {backLabel}</button>{step && <Steps n={step} />}</div>
+    <h1>{title}</h1>{sub && <p className="sub">{sub}</p>}
   </header>
 );
+export const Foot = ({ children }) => <div className="foot">{children}</div>;
+export const GCOL = ['#0f9478', '#e0a800', '#e8851a', '#d93636'];
+export const Dot = ({ g }) => <i className="gdot" style={{ background: GCOL[g] }} />;
+export const calLabel = (c, at) => { const idx = c.startMonth - 1 + (at - 1); return `${c.startYear + Math.floor(idx / 12)}.${String((idx % 12) + 1).padStart(2, '0')}`; };
+export const Slider = ({ value, onChange, min, max, step = 1 }) => <input type="range" className="rng" min={min} max={max} step={step} value={value} onChange={e => onChange(+e.target.value)} />;
 export const Field = ({ label, err, children, hint }) => (
   <label className="field"><span>{label}{err && <b className="err"> {err}</b>}</span>{children}{hint && <small className="muted">{hint}</small>}</label>
 );

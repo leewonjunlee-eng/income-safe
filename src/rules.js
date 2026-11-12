@@ -42,7 +42,7 @@ export function checkPlan(c, plan, m) {
 
 // ③ 시나리오 카드 → 엔진 shock
 export const SCENARIOS = {
-  stop: { name: '소득 정지', def: { at: 6, len: 3 } },
+  stop: { name: '소득 정지', def: { at: 10, len: 3 } },
   cut: { name: '소득 감소', def: { at: 6, len: 6, drop: 40 }, variableOnly: true },
   lump: { name: '목돈 지출', def: { at: 4, amount: 500 } },
   crash: { name: '투자 급락', def: { at: 6, preset: '2022형' } },
