@@ -21,17 +21,20 @@ const KEY = 'income-safe-v2';
 // 채택 뒤에 이 값들이 바뀌면 확정 리포트가 낡은 것이므로 재검증 상태로 돌린다
 const INPUT_KEYS = ['living', 'income', 'incomeByMonth', 'loanPay', 'loanBal', 'emergency', 'invest', 'goalDeposit', 'goalAmount', 'goalDate', 'taxShare', 'insurance', 'emergencyMonths', 'psychLimit', 'grade', 'type', 'planA', 'planB', 'spouse', 'household'];
 
+// 예전에 저장된 시장 환경에도 '현재형' 급락 프리셋을 넣는다
+const NOW_PRESET = { name: '현재형', label: '현재 시장형', period: '직전 고점 → 2026.11.11 (코스피 5,375)', months: 0, drop: 41 };
+const addNowPreset = m => (m.crashes.some(x => x.name === NOW_PRESET.name) ? m : { ...m, crashes: [...m.crashes, NOW_PRESET] });
 const validClient = c => c && c.work && c.planA?.alloc?.length === 4 && c.planB?.alloc?.length === 4 && c.insurance && typeof c.months === 'number';
 const validStore = s => s && Array.isArray(s.clients) && s.clients.every(validClient) && s.market?.asOf && s.market.deposit && s.market.crashes;
 
 async function load() {
   try {
     const s = JSON.parse(localStorage.getItem(KEY));
-    if (validStore(s)) return { ...s, marketLog: Array.isArray(s.marketLog) ? s.marketLog : I.SEED_LOG, outbox: Array.isArray(s.outbox) ? s.outbox : I.SEED_OUT };
+    if (validStore(s)) return { ...s, market: addNowPreset(s.market), marketLog: Array.isArray(s.marketLog) ? I.normLog(s.marketLog) : I.SEED_LOG, outbox: Array.isArray(s.outbox) ? s.outbox : I.SEED_OUT };
   } catch {}
   const get = u => fetch(u).then(r => { if (!r.ok) throw new Error(`${u} ${r.status}`); return r.json(); });
   const [clients, market] = await Promise.all([get('/data/clients.json'), get('/data/market.json')]);
-  return { clients: clients.map(c => ({ ...c, work: newWork() })), market, marketLog: I.SEED_LOG, outbox: I.SEED_OUT };
+  return { clients: clients.map(c => ({ ...c, work: newWork() })), market: addNowPreset(market), marketLog: I.SEED_LOG, outbox: I.SEED_OUT };
 }
 
 export default function App() {

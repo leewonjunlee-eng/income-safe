@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Head, Foot, Status, Seg, Field, NumIn, Sfx, fmt, comma, won, LABEL, calLabel, shocksOf, summary, copyText, evName, shockOk } from './ui.jsx';
+import { Head, Foot, Status, Seg, Field, NumIn, Sfx, fmt, comma, won, LABEL, calLabel, shocksOf, summary, copyText, evName, shockOk, TOTAL } from './ui.jsx';
 import { checkPlan, annualPlus, SCENARIOS, toShock, run, toMarket, safetyLine, products, retirement, TEMPLATES, mortgage, alertLevel, monthsBetween, inputProblems, PROFILE_MAX } from './rules.js';
 import { simulate, monteCarlo, GRADES } from './engine.js';
 
@@ -35,7 +35,6 @@ export function buildSchedule(st) {
 }
 
 /* ⓪ 대시보드 */
-const TOTAL = 12; // 시연 고정값: 담당 고객 12명
 const ORD = { recheck: 0, inprogress: 1, before: 2, adopted: 3 };
 export function Home({ st, go, setSt, nav }) {
   const [adding, setAdding] = useState(false), [name, setName] = useState('');
@@ -83,7 +82,7 @@ export function Home({ st, go, setSt, nav }) {
           </button>
         ))}
         {[['지호', '프리랜서 디자이너 · 변동형', '다음 상담 11.20'], ['수아', '간호사 · 고정형', 'ISA 만기 D-30']].map(([n, j, s]) => (
-          <div key={n} className="card item static"><i className="dot adopted" /><div><b className="nm">{n}</b> <span className="muted">{j}</span><br /><span className="muted">{s}</span></div><span className="chev">›</span></div>
+          <div key={n} className="card item static"><i className="dot adopted" /><div><b className="nm">{n}</b> <span className="muted">{j}</span><br /><span className="muted">{s}</span></div></div>
         ))}
         {adding ? (
           <div className="card"><Field label="새 고객 이름"><input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} autoFocus placeholder="이름" /></Field>
@@ -296,7 +295,8 @@ export function applySurvey(c) {
 /* ①-5 생애 이벤트 / ①-5b 템플릿 */
 const evSum = (n, p) => ({ 결혼: `생활비 +${p.living} / 월`, 출산: `${p.lump} · 생활비 +${p.living} · 소득 ${p.incomePct}% ${p.incomeMonths}개월`, 이직: `소득 공백 ${p.incomeMonths}개월 · 이후 소득 +${p.afterPct || 0}%`, '주택 구입': `계약금 ${comma(p.lump)} · 대출 ${comma(p.loan || 0)} · ${p.years || 30}년`, 육아휴직: `소득 ${p.incomePct}% ${p.incomeMonths}개월 · 생활비 +${p.living}`, 창업: `초기 자금 ${comma(p.lump)} · 소득 ${p.incomePct}% ${p.incomeMonths}개월 → 변동형` }[n]);
 const evParams = n => ({ ...TEMPLATES[n], ...(n === '주택 구입' ? { price: 40000, loan: 20000 } : {}) });
-export function Events({ client: c, upd, updWork, go, st }) {
+export function Events({ client: c, upd, updWork, go, st, nav }) {
+  const fromScen = nav.prev?.v === 'scen'; // 시나리오 선택에서 들어왔으면 그 화면으로 돌아간다
   const evs = c.events || [], has = n => evs.some(e => e.name === n), [msg, setMsg] = useState('');
   const toggle = n => { setMsg(''); upd(x => ({ events: has(n) ? evs.filter(e => e.name !== n) : [...evs, { name: n, ...evParams(n) }], work: { ...x.work, shocks: Object.fromEntries(Object.entries(x.work.shocks).filter(([t]) => t !== 'event')) } })); };
   const dateOf = e => (e.name === '결혼' ? c.goalDate.replace('-', '.') : e.at > c.months ? `${calLabel(c, e.at).slice(0, 4)} 예정` : calLabel(c, e.at));
@@ -311,7 +311,7 @@ export function Events({ client: c, upd, updWork, go, st }) {
   };
   return (
     <>
-      <Head back={() => go('info')} backLabel="고객 정보" title="생애 이벤트" sub="예정된 일을 고르면 현금흐름에 반영됩니다" step={1} />
+      <Head back={() => go(fromScen ? 'scen' : 'info')} backLabel={fromScen ? '시나리오 선택' : '고객 정보'} title="생애 이벤트" sub="예정된 일을 고르면 현금흐름에 반영됩니다" step={1} />
       <section className="pad">
         <div className="card"><p className="ttl">템플릿</p><div className="chips">{Object.keys(TEMPLATES).map(n => <button key={n} className={`chip ${has(n) ? 'on' : ''}`} aria-pressed={has(n)} onClick={() => toggle(n)}>{n}</button>)}</div></div>
         {pts.length > 0 && <div className="card tl"><div className="line" />
@@ -327,7 +327,7 @@ export function Events({ client: c, upd, updWork, go, st }) {
         {pts.length === 0 && <p className="muted center">위 템플릿에서 예정된 일을 골라 주세요</p>}
         {msg && <p className="err">{msg}</p>}
       </section>
-      <Foot><button className="btn" onClick={() => go('info')}>저장하고 다음</button><button className="link" onClick={send}>시나리오로 바로 보내기</button></Foot>
+      <Foot><button className="btn" onClick={() => go(fromScen ? 'scen' : 'info')}>{fromScen ? '저장하고 시나리오로' : '저장하고 다음'}</button><button className="link" onClick={send}>시나리오로 바로 보내기</button></Foot>
     </>
   );
 }
@@ -441,6 +441,7 @@ export function House({ client: c, upd, go, st }) {
             <tr><td>{c.goalName} 달성률</td><td>{fmt(Bi.goalPct)}%</td><td className="okc">{fmt(Bh.goalPct)}%</td></tr>
             <tr><td>A안 바닥 시점</td><td className={Ai.bottom ? 'err' : ''}>{bz(Ai)}</td><td>{bz(Ah)}</td></tr></tbody></table></div>
         <Note label="읽는 법">가구로 보면 B안은 {c.goalName}이 남습니다. 연금 비중을 입주 전부터 {c.planA.alloc[3]}%로 되돌릴 여지가 생깁니다.</Note>
+        <Note label="A안은?" tone="amber">가구 기준에서도 A안은 최저 {fmt(Ah.minMonths, 1)}개월로 목표 {c.emergencyMonths}개월에 못 미쳐 최고 경보가 '{Ah.grade}'입니다{Ah.overLimit ? `. 손실 체감 ${fmt(Ah.loss)}만 원으로 한도(${c.psychLimit}만 원)도 넘습니다` : Ah.bottom ? '' : '. 바닥은 없지만 안전하다는 뜻은 아닙니다'}.</Note>
         <p className="muted center">배우자 정보는 배우자 본인 동의 후 입력합니다</p>
       </section>
       <Foot>{spBad && <p className="err center">배우자 정보를 모두 입력하고, 공동 생활비는 0보다 커야 합니다.</p>}<button className="btn" disabled={spBad} onClick={() => { upd({ household: mode === 1, spouse: sp }); go('scen'); }}>{mode === 1 ? '가구' : '개인'} 기준으로 시뮬레이션</button></Foot>
@@ -606,6 +607,10 @@ export function Retire({ client: c, go, st }) {
         <div className="card"><div className="tr head3 r3"><span /><span>60세 적립액</span><span>현재가치</span></div>
           {[[`A안 · 계속 ${a}%`, R[0]], [`B안 · 입주 후 ${a}% 복귀`, R[1]], [`B안 · ${b}% 유지`, R[2]]].map(([l, r]) => <div className="tr r3" key={l}><span>{l}</span><b>{comma(r.fv)}</b><span className="muted">{comma(r.pv)}</span></div>)}</div>
         <Note label="읽는 법">입주 후 연금 비중을 {a}%로 되돌리면 A안과의 60세 차이는 <b>약 {r10(R[0].fv - R[1].fv)}만 원</b>(현재가치 약 {r10(R[0].pv - R[1].pv)}만 원)입니다. {b}%를 유지하면 차이가 약 {r10(R[0].fv - R[2].fv)}만 원으로 커집니다.</Note>
+        <div className="card"><p className="ttl">입주 후 투자 복귀 로드맵 · B안</p>
+          {[['단기', `~ ${c.goalDate.replace('-', '.')} 입주`, `비상자금·${c.goalName} 우선. 투자 ${c.planB.alloc[2]}%, 연금 ${b}% 유지`],
+            ['중기', '입주 후 1~2년', `비상자금 목표 ${c.emergencyMonths}개월을 채운 뒤 연금 ${a}%로 복귀`],
+            ['장기', '그 이후', `투자는 ${c.grade} 허용 한도(${PROFILE_MAX[c.grade]}%) 안에서 단계적으로 복귀`]].map(([t, w, d]) => <div className="kv" key={t}><div><span><b>{t}</b></span><small>{w}</small></div><div className="v">{d}</div></div>)}</div>
         <p className="muted center">소득·지출 현재 수준 유지 기준, 연 {m.pension.value}% 복리, 물가 {m.cpi.value}% 반영<br />시뮬레이션 기간 밖의 장기 전망입니다</p>
       </section>
       <Foot><button className="btn" onClick={() => go('result')}>결과 비교로 돌아가기</button></Foot>
@@ -718,12 +723,12 @@ export function Review({ client: c, upd, updWork, go, st }) {
 /* ⑤-3 고객용 제안서 */
 export function Proposal({ client: c, go, st }) {
   const plan = adoptedPlan(c), len = 3, sAt = Math.max(1, Math.min(10, c.months - 2)), stress = run(c, null, plan, [{ type: 'stop', at: sAt, len }], st.market), base = run(c, null, plan, [], st.market);
-  const target = c.living * c.emergencyMonths, now0 = c.emergency / c.living;
+  const target = c.living * c.emergencyMonths, now0 = c.emergency / c.living, gp = Math.round(stress.goalPct); // 달성률과 금액은 같은 반올림 값(gp)에서 계산
   const reach = base.emgArr.findIndex(v => v >= target) + 1, mo = reach > 0 ? reach : null;
   const after = mo ? `약 ${mo >= 12 ? `${Math.floor(mo / 12)}년 ${mo % 12 ? `${mo % 12}개월 ` : ''}` : `${mo}개월 `}뒤 ${c.emergencyMonths}개월` : `${c.emergencyMonths}개월을 향해 쌓는 중`;
   const re = plan.realloc || {}, picks = (c.work.schemes || []).map(id => ({ youth: '청년미래적금', umbrella: '노란우산공제', isa27: 'ISA 청년 소득공제(예정)' })[id]);
   const cc = { ...c, age: c.age || 30 }, gap = retirement(cc, st.market, c.planA.alloc[3], c.planA.alloc[3]).fv - retirement(cc, st.market, plan.alloc[3], c.planA.alloc[3], c.months).fv;
-  const share = async () => { const t = `${c.name} 님 재무 제안서 요약: 일이 ${len}개월 끊겨도 ${c.goalName} ${fmt(stress.goalPct)}% 확보`; try { if (navigator.share) await navigator.share({ title: '재무 제안서', text: t }); else { await navigator.clipboard?.writeText(t); alert('요약 문구를 복사했습니다. 카카오톡에 붙여넣어 보내세요.'); } } catch {} };
+  const share = async () => { const t = `${c.name} 님 재무 제안서 요약: 일이 ${len}개월 끊겨도 ${c.goalName} ${gp}% 확보`; try { if (navigator.share) await navigator.share({ title: '재무 제안서', text: t }); else { await navigator.clipboard?.writeText(t); alert('요약 문구를 복사했습니다. 카카오톡에 붙여넣어 보내세요.'); } } catch {} };
   return (
     <>
       <header className="head plain"><Status demo />
@@ -731,13 +736,14 @@ export function Proposal({ client: c, go, st }) {
       <section className="pad prop">
         <p className="sub">{st.market.asOf.replace(/-/g, '.')} 재무 제안서</p>
         <h1 className="ptitle">{c.name} 님,<br />일이 {len}개월 끊겨도<br />{stress.bottom ? <>{stress.bottom}개월째에 보완이 필요해요</> : '버틸 수 있는 계획이에요'}</h1>
-        {[['#0f9478', `비상금을 ${c.emergencyMonths}개월치까지`, `지금 ${fmt(now0, 1)}개월 → ${after}`], ['#1e3aaf', `${c.goalName} ${fmt(stress.goalPct)}% 이상 확보`, `일이 끊겨도 ${comma(Math.round(c.goalAmount * stress.goalPct / 1000) * 10)}만 원 이상`], ['#7c5cc9', '노후 준비는 입주 후 다시 늘리기', `60세 차이 약 ${comma(Math.round(gap / 10) * 10)}만 원`]].map(([col, t, d], i) => (
+        {[['#0f9478', `비상금을 ${c.emergencyMonths}개월치까지`, `지금 ${fmt(now0, 1)}개월 → ${after}`], ['#1e3aaf', `${c.goalName} ${gp}% 이상 확보`, `일이 끊겨도 ${comma(Math.round(c.goalAmount * gp / 1000) * 10)}만 원 이상`], ['#7c5cc9', '노후 준비는 입주 후 다시 늘리기', `60세 차이 약 ${comma(Math.round(gap / 10) * 10)}만 원`]].map(([col, t, d], i) => (
           <div className="pcard" key={i}><i style={{ background: col }}>{i + 1}</i><div><b>{t}</b><p>{d}</p></div></div>))}
         <div className="card"><p className="ttl dk">이번 달 할 일</p>
           {re.invToEmerg > 0 && <p className="td">✓ 투자 계좌에서 <b>{comma(re.invToEmerg)}만 원</b> → 비상금 통장</p>}
           {re.invToGoal > 0 && <p className="td">✓ 투자 계좌에서 <b>{comma(re.invToGoal)}만 원</b> → {c.goalName} 예금</p>}
           <p className="td">✓ 매달 남는 돈 {plan.alloc[0] === 50 ? '절반' : plan.alloc[0] === 100 ? '전부' : `${plan.alloc[0]}%`}은 비상금 통장으로</p>
           {picks.length > 0 && <p className="td">✓ 확인해 볼 제도: {picks.join(', ')}</p>}</div>
+        <p className="muted">가정: 지금부터 {sAt}개월 후 시작, {len}개월 소득 정지 기준 · 시장 기준일 {st.market.asOf.replace(/-/g, '.')}</p>
         <p className="muted">이 제안은 현재 소득·지출과 기대수익률에 따른 계산이며 미래 결과를 보장하지 않습니다. 투자상품은 원금 손실이 생길 수 있습니다.</p>
       </section>
       <Foot><div className="row two"><button className="btn ghost" onClick={() => window.print()}>PDF 저장</button><button className="btn" onClick={share}>카카오톡 공유</button></div></Foot>
@@ -767,7 +773,7 @@ export function Monitor({ client: c, upd, go, st }) {
   const ticks = [0, 500, 1000, 1500, 2000].filter(v => v <= max);
   return (
     <>
-      <Head back={() => go('report')} backLabel="검증 리포트" title={`모니터링 · ${c.name}`} sub={<><b className="amb">실행 {e}개월째</b> · {c.adopted || 'B'}안 · {calLabel(c, e)}</>} step={6} demo />
+      <Head back={() => go('report')} backLabel="검증 리포트" title={`모니터링 · ${c.name}`} sub={<><b className="amb">실행 {e}개월째</b> · {c.adopted || 'B'}안 · {calLabel(c, e)}</>} step={6} demo="예시 시점" />
       <section className="pad">
         <div className={`mon l${lv}`}><div><small>현재 경보</small><h2><i style={{ background: COL }} />{lv ? GRADES[lv] : '정상'}</h2></div>{lv > 0 && <span className="rcb">재검증 필요</span>}</div>
         <div className="two2"><div className="card sm3"><small>3개월 소득</small><b style={{ color: COL }}>{dec > 0 ? '−' : '+'}{Math.abs(Math.round(dec * 100))}%</b><span className="muted">실제 {comma(act)} / 계획 {comma(pl)}</span></div>
@@ -782,6 +788,7 @@ export function Monitor({ client: c, upd, go, st }) {
         <div className="card"><p className="ttl">이번 달 입력 · {calLabel(c, e)}</p>
           <div className="grid2"><Field label="실제 소득"><Sfx value={inc[2]} onChange={v => setInc([inc[0], inc[1], v])}>만 원</Sfx></Field><Field label="비상자금 잔액"><Sfx value={emg} onChange={v => setEmg(v === '' ? 0 : v)}>만 원</Sfx></Field></div>
           <details><summary className="muted">이전 두 달 소득·현재 자산·향후 소득 전망</summary><div className="grid2"><Field label="현재 투자자산 (비우면 기존 값)"><NumIn value={invNow} onChange={setInvNow} /></Field><Field label="현재 목표 예금 (비우면 기존 값)"><NumIn value={goalNow} onChange={setGoalNow} /></Field></div><Field label="향후 소득 전망 (계획 대비 %)"><NumIn value={inc2} onChange={v => setInc2(v === '' ? 100 : v)} /></Field><div className="grid3"><Field label="2개월 전"><NumIn value={inc[0]} onChange={v => setInc([v, inc[1], inc[2]])} /></Field><Field label="1개월 전"><NumIn value={inc[1]} onChange={v => setInc([inc[0], v, inc[2]])} /></Field><Field label="경과(개월)"><NumIn value={el} onChange={v => setEl(v === '' ? 3 : v)} /></Field></div></details></div>
+        <div className="card sm2"><b>재검증 주기</b> 분기(3개월)마다 정기 점검 · 금리 0.25%p·물가 0.5%p 변동, 코스피 고점 대비 −20% 이하일 때는 즉시</div>
         <div className="card"><p className="ttl">고객 안내 문구</p><p>{lv > 0 ? `최근 3개월 소득이 계획보다 ${Math.abs(Math.round(dec * 100))}% ${dec > 0 ? '줄었습니다' : '늘었습니다'}. 재량지출을 줄이고 비상자금 이체를 먼저 챙겨 주세요.` : '계획대로 진행 중입니다. 다음 점검까지 지금 방식을 유지해 주세요.'}</p></div>
       </section>
       <Foot><button className="btn" onClick={revalidate}>현재 잔액으로 재검증</button></Foot>

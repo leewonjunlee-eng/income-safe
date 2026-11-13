@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Head, Foot, Status, comma, copyText } from './ui.jsx';
+import { Head, Foot, Status, comma, copyText, TOTAL } from './ui.jsx';
 import { buildSchedule } from './Wire.jsx';
 
 const FIELD_ORDER = ['annualRevenue', 'monthlyLiving', 'emergency', 'invest', 'loanBal', 'loanPay', 'hasSonjil', 'incomeProtectionMonthly'];
@@ -177,7 +177,7 @@ export function applyMarket(s, data, now = new Date()) {
     m[k].src = src;
     if (Math.abs(nv - old) >= 0.005) {
       const hit = Math.abs(nv - old) >= thr; if (hit) big = true;
-      log.push({ d, t: `${label} ${Number(old).toFixed(2)} → ${nv.toFixed(2)}%`, s: hit ? 'RECHECK' : k === 'cpi' ? '노후 전망 현재가치만 갱신' : '기준 미만 변동 · 경보 변화 0명' });
+      log.push({ d, t: `${label} ${Number(old).toFixed(2)} → ${nv.toFixed(2)}%`, s: hit ? 'RECHECK' : `고객 ${TOTAL}명 재계산 · ${k === 'cpi' ? '노후 전망 현재가치만 갱신' : '기준 미만 변동 · 경보 변화 0명'}` });
       m[k].value = nv;
     }
     return true;
@@ -190,7 +190,7 @@ export function applyMarket(s, data, now = new Date()) {
   ];
   const kx = v.kospi, kOk = kx && okNum(kx.drawdown) && okNum(kx.value);
   if (kOk) { got++; if (kx.drawdown <= -20 && !(s.kospi && s.kospi.drawdown <= -20)) { big = true; log.push({ d, t: `코스피 고점 대비 ${kx.drawdown.toFixed(1)}%`, s: 'RECHECK' }); } }
-  const n = s.clients.length, flip = big ? s.clients.filter(c => c.status === 'adopted').length : 0;
+  const n = TOTAL, flip = big ? s.clients.filter(c => c.status === 'adopted').length : 0;
   log.forEach(l => { if (l.s === 'RECHECK') l.s = `고객 ${n}명 재계산 · 경보 변화 ${flip}명`; });
   if (ok.every(Boolean)) m.asOf = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`; // 일부만 성공하면 기준일은 그대로 둔다
   const next = { ...s, market: m, lastRefresh: now.toISOString(), kospi: kOk ? kx : s.kospi, marketLog: [...log, ...(Array.isArray(s.marketLog) ? s.marketLog : [])].slice(0, 30),
@@ -214,10 +214,12 @@ export async function refreshMarket(st, setSt) {
   } catch { return fail(keep); }
 }
 
+// 예전에 저장된 변경 기록도 같은 표기로: '고객 12명 재계산 · …'
+export const normLog = log => log.map(l => (l.s === '변화 없음' ? l : { ...l, s: `고객 ${TOTAL}명 재계산 · ${String(l.s).replace(/^고객 \d+명 재계산 · /, '')}` }));
 export const SEED_LOG = [
-  { d: '10.22', t: '기준금리 3.00% 동결', s: '변화 없음' },
+  { d: '11.03', t: '물가 2.9 → 2.8%', s: '고객 12명 재계산 · 노후 전망 현재가치만 갱신' },
   { d: '10.29', t: '예금 금리 3.21 → 3.45%', s: '고객 12명 재계산 · 경보 변화 0명' },
-  { d: '11.03', t: '물가 2.9 → 2.8%', s: '노후 전망 현재가치만 갱신' },
+  { d: '10.22', t: '기준금리 3.00% 동결', s: '변화 없음' },
 ];
 export function Auto({ st, setSt, go }) {
   const [cfg, setCfg] = useState(null), [busy, setBusy] = useState(false), [res, setRes] = useState(null), [code, setCode] = useState('');
@@ -226,7 +228,7 @@ export function Auto({ st, setSt, go }) {
   const last = st.lastRefresh ? new Date(st.lastRefresh) : null, lastStr = last ? `${pad2(last.getMonth() + 1)}.${pad2(last.getDate())} ${pad2(last.getHours())}:${pad2(last.getMinutes())}` : '11.12 09:00';
   const run = async () => { setBusy(true); try { setRes(await refreshMarket(st, setSt)); } finally { setBusy(false); } };
   const need = cfg ? [!cfg.ecos && 'ecos', !cfg.kosis && 'kosis', !cfg.datagokr && 'datagokr'].filter(Boolean) : [];
-  const log = Array.isArray(st.marketLog) ? st.marketLog : [];
+  const log = (Array.isArray(st.marketLog) ? [...st.marketLog] : []).sort((a, b) => b.d.localeCompare(a.d)); // 최신순 (ponytail: MM.DD 문자열 정렬, 연말·연초가 섞이면 연도 필드 필요)
   return (
     <>
       <Head back={() => go('market')} backLabel="시장 환경" title="시장 데이터 자동 갱신" sub="공식 통계가 바뀌면 고객 시뮬레이션을 다시 계산합니다" right="설정" />

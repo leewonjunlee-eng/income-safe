@@ -8,7 +8,7 @@ const Row2 = ({ l, sub, err, children }) => <div className="kv2"><div><b>{l}</b>
 
 /* ① 고객 정보 */
 export function Info({ client: c, upd, go, st }) {
-  const [tab, setTab] = useState(0), [copied, setCopied] = useState(null), [ref, setRef] = useState(false);
+  const [tab, setTab] = useState(0), [copied, setCopied] = useState(null), [ref, setRef] = useState(false), [tried, setTried] = useState(false); // 오류 문구는 '저장하고 다음'을 누른 뒤에만
   const mo = monthsBetween(c);
   const set = (k, v) => upd({ [k]: v });
   const switchType = k => {
@@ -20,51 +20,51 @@ export function Info({ client: c, upd, go, st }) {
   };
   const setInc = (m, v) => upd({ incomeByMonth: { ...(c.incomeByMonth || {}), [m]: v } });
   const empty = v => v === '' || v == null;
-  const errs = [
+  const errs0 = [
     empty(c.type) || empty(c.taxShare) || (c.type === 'fixed' ? empty(c.income) : Object.values(c.incomeByMonth || {}).length < 12 || Object.values(c.incomeByMonth || {}).some(empty)),
     empty(c.living) || +c.living <= 0,
     empty(c.emergency) || empty(c.invest) || empty(c.goalDeposit),
     empty(c.goalAmount) || +c.goalAmount <= 0 || !c.goalName || mo == null || empty(c.emergencyMonths) || +c.emergencyMonths <= 0 || empty(c.psychLimit),
     false,
   ];
-  const problems = inputProblems(c), ok = !errs.some(Boolean) && problems.length === 0;
+  const problems = inputProblems(c), ok = !errs0.some(Boolean) && problems.length === 0, errs = errs0.map(e => tried && e);
   const target = c.living * c.emergencyMonths, totalAssets = (+c.emergency || 0) + (+c.invest || 0) + (+c.goalDeposit || 0);
   const incs = c.type === 'variable' ? Array.from({ length: 12 }, (_, i) => +(c.incomeByMonth || {})[i + 1] || 0) : [];
   const sum = incs.reduce((a, b) => a + b, 0), avg = sum / 12, min = Math.min(...incs);
   const lowMonths = incs.map((v, i) => (v === min ? i + 1 : null)).filter(Boolean);
   const range = lowMonths.length > 1 ? `${lowMonths[0]}~${lowMonths[lowMonths.length - 1]}월` : `${lowMonths[0]}월`;
   const prompt = () => `당신은 재무설계 전문가입니다. 아래 고객에게 맞는 자산배분안(비상자금/목표 예금/투자/연금 월 비중 %)을 제안하세요. 한도와 세율은 현행 기준으로 근거와 함께 쓰세요.\n- 소득: ${c.type === 'fixed' ? `고정형 세후 ${c.income}만원` : `변동형 월 ${Object.values(c.incomeByMonth || {}).join('/')}만원 (1~12월)`}, 세금 몫 ${fmt(c.taxShare * 100)}%\n- 생활비 월 ${c.living}만원, 월 대출 상환 ${c.loanPay || 0}만원\n- 비상자금 ${c.emergency}, 투자자산 ${c.invest}, 목표 예금 ${c.goalDeposit} (만원)\n- 목표: ${c.goalName} ${c.goalAmount}만원, ${c.goalDate} (${mo ?? '-'}개월)\n- 투자성향 ${c.grade}, 심리적 손실 한도 ${c.psychLimit}만원`;
-  const save = () => { upd({ months: mo, status: c.status === 'before' ? 'inprogress' : c.status }); go('plan'); };
+  const save = () => { if (!ok) return setTried(true); upd({ months: mo, status: c.status === 'before' ? 'inprogress' : c.status }); go('plan'); };
   return (
     <>
       <Head back={() => go('home')} backLabel="고객" title={`고객 정보 · ${c.name}`} sub="시뮬레이션 기준값을 확인하세요" step={1} />
       <section className="pad">
         <Seg items={['소득', '지출', '자산', '목표', '보험·성향'].map((t, i) => ({ label: t, dot: errs[i] }))} value={tab} onChange={setTab} />
-        {problems.length > 0 && <div className="note2 amber"><b>다음 단계로 가려면</b> {problems.join(', ')} 항목을 확인해 주세요.</div>}
+        {tried && problems.length > 0 && <div className="note2 amber"><b>다음 단계로 가려면</b> {problems.join(', ')} 항목을 확인해 주세요.</div>}
         {c.survey && !c.surveyApplied && <div className="panel blue"><b>사전 설문 도착</b><p className="muted">고객이 입력한 답변은 초안입니다. 확인 후 반영하세요.</p><button className="btn sm" onClick={() => upd(X.applySurvey(c))}>설문 답변을 입력칸에 반영</button></div>}
         {tab === 0 && <>
           <div className="card"><p className="ttl">소득 유형</p>
             <div className="row two">{[['fixed', '고정형 (월급)'], ['variable', '변동형 (매출)']].map(([k, l]) => <button key={k} className={`opt ${c.type === k ? 'on' : ''}`} onClick={() => switchType(k)}>{l}</button>)}</div></div>
           {c.type === 'fixed'
-            ? <div className="card"><Field label="월 소득 (세후, 만원)" err={empty(c.income) ? '필수 항목입니다' : ''}><NumIn value={c.income} onChange={v => set('income', v)} /></Field></div>
+            ? <div className="card"><Field label="월 소득 (세후, 만원)" err={tried && empty(c.income) ? '필수 항목입니다' : ''}><NumIn value={c.income} onChange={v => set('income', v)} /></Field></div>
             : <div className="card"><div className="row between"><p className="ttl">월별 소득 계획</p><span className="muted">단위 만 원</span></div>
               <div className="mgrid">{Array.from({ length: 12 }, (_, i) => i + 1).map(m => { const v = +(c.incomeByMonth || {})[m] || 0; const cls = v >= avg * 1.25 ? 'hi' : v <= avg * 0.6 ? 'lo' : ''; return <label key={m} className={`mcell ${cls}`}><span>{m}월</span><input type="number" inputMode="numeric" aria-label={`${m}월 소득`} value={(c.incomeByMonth || {})[m] ?? ''} onChange={e => setInc(m, e.target.value === '' ? '' : Number(e.target.value))} /></label>; })}</div>
               <div className="row between sum"><span>연 소득 <b>{fmt(sum).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}</b></span><span>월평균 <b>{fmt(avg)}</b></span><span>최저 <b className="amb">{min}</b> ({range})</span></div></div>}
           <div className="card row between"><div><p className="ttl">세금·보험 몫</p><p className="muted">{c.type === 'fixed' ? '고정형은 0으로 고정' : '소득에서 먼저 떼어 두는 비율'}</p></div><Sfx disabled={c.type === 'fixed'} value={fmt(c.taxShare * 100)} onChange={v => set('taxShare', v / 100)}>%</Sfx></div>
         </>}
         {tab === 1 && <div className="card">
-          <Field label="고정 생활비 (월, 만원)" err={empty(c.living) ? '필수 항목입니다' : +c.living <= 0 ? '0보다 커야 합니다' : ''}><NumIn value={c.living} onChange={v => set('living', v)} /></Field>
+          <Field label="고정 생활비 (월, 만원)" err={!tried ? '' : empty(c.living) ? '필수 항목입니다' : +c.living <= 0 ? '0보다 커야 합니다' : ''}><NumIn value={c.living} onChange={v => set('living', v)} /></Field>
           <Field label="월 대출 상환액"><NumIn value={c.loanPay} onChange={v => set('loanPay', v)} /></Field>
           <Field label="대출 잔액"><NumIn value={c.loanBal} onChange={v => set('loanBal', v)} /></Field></div>}
         {tab === 2 && <div className="card">
-          <Field label="비상자금" err={empty(c.emergency) ? '필수 항목입니다' : ''}><NumIn value={c.emergency} onChange={v => set('emergency', v)} /></Field>
-          <Field label="투자자산" err={empty(c.invest) ? '필수 항목입니다' : ''}><NumIn value={c.invest} onChange={v => set('invest', v)} /></Field>
-          <Field label="목표용 예금" err={empty(c.goalDeposit) ? '필수 항목입니다' : ''}><NumIn value={c.goalDeposit} onChange={v => set('goalDeposit', v)} /></Field></div>}
+          <Field label="비상자금" err={tried && empty(c.emergency) ? '필수 항목입니다' : ''}><NumIn value={c.emergency} onChange={v => set('emergency', v)} /></Field>
+          <Field label="투자자산" err={tried && empty(c.invest) ? '필수 항목입니다' : ''}><NumIn value={c.invest} onChange={v => set('invest', v)} /></Field>
+          <Field label="목표용 예금" err={tried && empty(c.goalDeposit) ? '필수 항목입니다' : ''}><NumIn value={c.goalDeposit} onChange={v => set('goalDeposit', v)} /></Field></div>}
         {tab === 3 && <>
           <div className="card"><p className="ttl">재무 목표</p>
             <Row2 l="목표 이름"><input className="rin" aria-label="목표 이름" value={c.goalName} onChange={e => set('goalName', e.target.value)} /></Row2>
             <Row2 l="목표 금액" sub={`현재 목표 예금 ${comma(c.goalDeposit)}`}><label className="inl"><NumIn value={c.goalAmount} onChange={v => set('goalAmount', v)} /><span>만 원</span></label></Row2>
-            <Row2 l="목표 시점" sub={mo != null ? `지금부터 ${mo}개월 후` : ''} err={mo == null ? '1~60개월 사이로 입력해 주세요' : ''}><input type="month" className="rin" aria-label="목표 시점" value={c.goalDate} onChange={e => set('goalDate', e.target.value)} /></Row2></div>
+            <Row2 l="목표 시점" sub={mo != null ? `지금부터 ${mo}개월 후` : ''} err={tried && mo == null ? '1~60개월 사이로 입력해 주세요' : ''}><input type="month" className="rin" aria-label="목표 시점" value={c.goalDate} onChange={e => set('goalDate', e.target.value)} /></Row2></div>
           <div className="card"><p className="ttl">비상자금 목표</p>
             <Row2 l="목표 개월수" sub={`생활비 ${c.living} × ${c.emergencyMonths} = ${comma(target)}만 원`}><label className="inl"><NumIn value={c.emergencyMonths} onChange={v => set('emergencyMonths', v)} /><span>개월</span></label></Row2>
             <p className="muted">기본값: 고정형 3개월 · 변동형 6개월 <button className="lnk" onClick={() => setRef(!ref)}>기준 보기</button></p>
@@ -94,7 +94,7 @@ export function Info({ client: c, upd, go, st }) {
       </section>
       <Foot>
         <button className="btn ghost" onClick={async () => setCopied((await copyText(prompt())) ? 'ok' : 'fail')}>{copied === 'ok' ? '복사했습니다' : copied === 'fail' ? '복사하지 못했습니다 · 브라우저 권한을 확인하세요' : 'AI에 넣을 질문 복사'}</button>
-        <button className="btn" disabled={!ok} onClick={save}>저장하고 다음</button>
+        <button className="btn" onClick={save}>저장하고 다음</button>
       </Foot>
     </>
   );
@@ -190,7 +190,7 @@ export function Scen({ client: c, updWork, go, st }) {
         ))}
         {sel.event
           ? <div className="scard col on"><button className="shead" onClick={() => toggle('event')}><i className="cb on" /><div><b>생애 이벤트 · {evName(sel.event)}</b><p className="muted">{(Array.isArray(sel.event) ? sel.event : [sel.event]).map(e => `${e.name} ${e.at}개월 후`).join(' · ')}</p></div></button></div>
-          : <button className="scard" onClick={() => go('events')}><div><b>생애 이벤트 · 금리 상승</b><p className="muted">출산 템플릿 · 금리 상승은 대출 고객만</p></div><span>›</span></button>}
+          : <button className="scard" onClick={() => go('events')}><div><b>생애 이벤트</b><p className="muted">결혼·출산·이직·주택 구입 등 템플릿에서 선택</p></div><span>›</span></button>}
         {msg && <p className="err">{msg}</p>}{errs.map(e => <p key={e} className="err">{e}</p>)}
         <p className="muted center">시뮬레이션 기간 {c.months}개월 ({calLabel(c, 1)} ~ {calLabel(c, c.months)}) · 수익률은 고정</p>
       </section>
@@ -225,6 +225,8 @@ export function Result({ client: c, updWork, upd, go, st }) {
           {rows.map(([l, a, b, ae, be], i) => <div className="tr res" key={i}><span>{l}</span><b className={ae ? 'err' : ''}>{a}</b><b className={be ? 'err' : 'ok'}>{b}</b></div>)}
           <div className="tr res"><span>최고 경보</span><b><Dot g={A.maxGrade} />{A.grade}</b><b><Dot g={B.maxGrade} />{B.grade}</b></div>
         </div>
+        {B.grade === '위험' && <div className="note2 amber"><b>경보 기준</b> '위험'은 3개월 소득 −50% 이상 또는 비상자금이 목표({c.emergencyMonths}개월)의 1/3({fmt(c.emergencyMonths / 3, 1)}개월) 미만일 때입니다. B안은 최저 {fmt(B.minMonths, 1)}개월로 위험 단계{!B.bottom && B.forced === 0 ? '지만 비상자금 바닥·강제 매도는 없습니다' : '입니다'}.</div>}
+        {active.some(([t]) => t === 'crash') && <p className="muted center sm">총자산 MDD(고점 대비 최대 낙폭) · A {fmt(A.mdd, 1)}% · B {fmt(B.mdd, 1)}%</p>}
         <div className="card"><div className="row between"><p className="ttl">월별 비상자금 잔액</p><span className="legend"><i className="la" />A <i className="lb" />B</span></div>
           <Chart a={A.emgArr} b={B.emgArr} target={c.living * c.emergencyMonths} living={c.living} /></div>
         <div className="row stretch">

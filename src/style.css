@@ -122,3 +122,5 @@ details.card summary { font-weight:700; color:var(--sub); font-size:14px; cursor
 .face { padding:22px 22px 44px; } .face h1 { font-size:30px; } .face .big { font-size:24px; font-weight:800; line-height:1.4; margin:20px 0; } .face input[type=range] { width:100%; }
 .prop h2 { font-size:22px; line-height:1.4; }
 @media print { .noprint, .back, .steps, .foot, .tabs { display:none !important; } html, body { background:#fff; } .app { max-width:none; padding:0; box-shadow:none; } }
+
+.stepc { display:flex; flex-direction:column; align-items:flex-end; gap:4px; } .stepc small { font-size:11px; font-weight:700; color:var(--sub); }

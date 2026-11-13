@@ -21,7 +21,7 @@ export function simulate({ client: c0, plan: plan0, market: m, shocks = [], mont
   emg += re.invToEmerg || 0; gb[0] += re.invToGoal || 0; inv -= (re.invToEmerg || 0) + (re.invToGoal || 0);
 
   const planInc = [], actInc = [], emgArr = [];
-  let forced = 0, shortfall = 0, crashLoss = 0, bottom = null, minMonths = Infinity, maxGrade = 0, planPos = 0;
+  let forced = 0, shortfall = 0, crashLoss = 0, bottom = null, minMonths = Infinity, maxGrade = 0, planPos = 0, used = 0, peak = 0, mdd = 0;
 
   for (let i = 0; i < n; i++) {
     const calM = ((startMonth - 1 + i) % 12) + 1;
@@ -76,9 +76,10 @@ export function simulate({ client: c0, plan: plan0, market: m, shocks = [], mont
     inv *= 1 + (opts.rand ? opts.rand.ret[i] : m.invest / 12);
     pen *= 1 + m.pension / 12;
     // 기한이 된 달 끝에 그 목표를 사용 처리
-    goals.forEach((g, k) => { if (g.end === i + 1 && gpct[k] === null) { gpct[k] = g.amount > 0 ? (gb[k] / g.amount) * 100 : 0; gb[k] = 0; } });
+    goals.forEach((g, k) => { if (g.end === i + 1 && gpct[k] === null) { gpct[k] = g.amount > 0 ? (gb[k] / g.amount) * 100 : 0; used += gb[k]; gb[k] = 0; } });
 
     emgArr.push(emg);
+    const tot = emg + inv + pen + used + gb.reduce((x, y) => x + y, 0); peak = Math.max(peak, tot); if (peak > 0) mdd = Math.max(mdd, (peak - tot) / peak); // 총자산 MDD
     const em = emg / baseLiving; minMonths = Math.min(minMonths, em);
     // 경보
     const a = Math.max(0, i - 2);
@@ -92,7 +93,7 @@ export function simulate({ client: c0, plan: plan0, market: m, shocks = [], mont
   }
   return {
     bottom, minMonths, forced, shortfall, crashLoss, loss: forced + shortfall + crashLoss, overLimit: forced + shortfall + crashLoss > c.psychLimit,
-    goalPct: gpct[0] ?? 0, goalPcts: gpct.map(x => x ?? 0), maxGrade, grade: GRADES[maxGrade], emgArr, planPos, pension: pen,
+    mdd: mdd * 100, goalPct: gpct[0] ?? 0, goalPcts: gpct.map(x => x ?? 0), maxGrade, grade: GRADES[maxGrade], emgArr, planPos, pension: pen,
   };
 }
 

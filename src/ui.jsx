@@ -6,9 +6,12 @@ export const newWork = () => ({ shocks: {}, judge: {}, memo: '', record: null, s
 export const LABEL = ['비상자금', '목표 예금', '투자', '연금'];
 export const STATUS = { recheck: '재검증 필요', inprogress: '검증 진행 중', before: '검증 전', adopted: '채택 완료' };
 
-export const Steps = ({ n }) => <div className="steps">{[1, 2, 3, 4, 5, 6].map(i => <i key={i} className={i <= n ? 'on' : ''} />)}</div>;
+export const STEP_NAMES = ['정보·목표', '배분안', '분석', '제안', '실행', '모니터링']; // 표준 재무설계 6단계
+export const TOTAL = 12; // 시연 고정값: 담당 고객 12명
+export const Steps = ({ n }) => <div className="stepc"><div className="steps">{[1, 2, 3, 4, 5, 6].map(i => <i key={i} className={i <= n ? 'on' : ''} />)}</div><small>{n}단계 {STEP_NAMES[n - 1]}</small></div>;
+// demo가 문자열일 때만 칩을 보인다 (예: 모니터링의 '예시 시점')
 export const Status = ({ demo }) => (
-  <div className="status"><b>9:41</b><i className="batt" /></div>
+  <div className={`status ${typeof demo === 'string' ? 'has-chip' : ''}`}><b>9:41</b>{typeof demo === 'string' && <span className="demochip">{demo}</span>}<i className="batt" /></div>
 );
 export const Head = ({ back, title, sub, step, backLabel = '뒤로', right, demo, dark }) => (
   <header className={`head ${dark ? 'dark' : ''}`}>
