@@ -440,8 +440,7 @@ export function House({ client: c, upd, go, st }) {
             <tr><td>최저 비상자금</td><td>{fmt(Bi.minMonths, 1)}개월</td><td className="okc">{fmt(Bh.minMonths, 1)}개월</td></tr>
             <tr><td>{c.goalName} 달성률</td><td>{fmt(Bi.goalPct)}%</td><td className="okc">{fmt(Bh.goalPct)}%</td></tr>
             <tr><td>A안 바닥 시점</td><td className={Ai.bottom ? 'err' : ''}>{bz(Ai)}</td><td>{bz(Ah)}</td></tr></tbody></table></div>
-        <Note label="읽는 법">가구로 보면 B안은 {c.goalName}이 남습니다. 연금 비중을 입주 전부터 {c.planA.alloc[3]}%로 되돌릴 여지가 생깁니다.</Note>
-        <Note label="A안은?" tone="amber">가구 기준에서도 A안은 최저 {fmt(Ah.minMonths, 1)}개월로 목표 {c.emergencyMonths}개월에 못 미쳐 최고 경보가 '{Ah.grade}'입니다{Ah.overLimit ? `. 손실 체감 ${fmt(Ah.loss)}만 원으로 한도(${c.psychLimit}만 원)도 넘습니다` : Ah.bottom ? '' : '. 바닥은 없지만 안전하다는 뜻은 아닙니다'}.</Note>
+        <Note label="읽는 법">가구로 보면 A안도 바닥나지 않지만, 배우자 자금에 기대는 결과입니다. 소득 정지 시점({calLabel(c, 10)})은 결혼({c.goalDate.replace('-', '.')}) 전이라 채택 판단은 개인 기준으로 합니다. A안의 투자 {c.planA.alloc[2]}%는 가구로 봐도 {c.name} 님 투자성향 허용치({PROFILE_MAX[c.grade]}%)를 넘습니다. B안은 가구 기준 {c.goalName}이 남아, 연금 비중을 입주 전부터 {c.planA.alloc[3]}%로 되돌릴 여지가 생깁니다.</Note>
         <p className="muted center">배우자 정보는 배우자 본인 동의 후 입력합니다</p>
       </section>
       <Foot>{spBad && <p className="err center">배우자 정보를 모두 입력하고, 공동 생활비는 0보다 커야 합니다.</p>}<button className="btn" disabled={spBad} onClick={() => { upd({ household: mode === 1, spouse: sp }); go('scen'); }}>{mode === 1 ? '가구' : '개인'} 기준으로 시뮬레이션</button></Foot>
